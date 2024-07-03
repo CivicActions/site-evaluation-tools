@@ -39,7 +39,9 @@ The processed data is uploaded to the following Google Sheets document: [Google 
 1. Save your [OAuth](https://developers.google.com/workspace/guides/configure-oauth-consent) Config
 1. Ensure you have a recent version of node running
 1. Run `node digital.gov-scan-upload.js.md`
- 
+
+## Maintainer
+The maintainer of this script is Mike Gifford. Bugs, features and comments can be left in the issue queue. 
 
 ## License
 
