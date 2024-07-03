@@ -14,9 +14,9 @@ This Node.js script downloads a CSV file from a specified URL, renames it with t
 
 ### Advantages
 
-•	Data Aggregation: The data is easier to consume in a Google Sheets format than in a CSV file.
-•	Data Integrity: Changes in the data structure can be detected, allowing for error checking.
-•	Accountability: Highlighting agencies that are falling behind can encourage improvements. Monitoring and visibility are key.
+- Data Aggregation: The data is easier to consume in a Google Sheets format than in a CSV file.
+- Data Integrity: Changes in the data structure can be detected, allowing for error checking.
+- Accountability: Highlighting agencies that are falling behind can encourage improvements. Monitoring and visibility are key.
 
 ## Google Sheets Document
 
