@@ -1,6 +1,11 @@
-# GitHub Repo Tracker
+# Digital.gov [Site Scanning program](https://digital.gov/guides/site-scanning/) - Google Sheet Highlights
 
-This Node.js script downloads a CSV file from a specified URL, renames it with the current date, and uploads its contents to a new Google Sheets document. The script also updates an “Introduction” sheet within the Google Sheets document to keep track of the new sheet names. The Google Sheets API is used to handle authentication and data operations.
+This Node.js script downloads a CSV file from [a specified URL (weekly-snapshot.csv)](https://api.gsa.gov/technology/site-scanning/data/weekly-snapshot.csv), renames it with the current date, and uploads its contents to a Google Sheets document. The Google Sheets API is used to handle authentication and data operations.
+
+By presenting the CSV data as a Google Sheet, it is:
+* Easier to see the data aggregated here than it is in a CSV file. Making it more consumable for everyone.
+* A check against changes to the data.  Errors may show up if there are changes in the data structure.
+* Useful to highlight those agencies which are falling behind. Making this more visible may encourage improvements. If it isn't monitored it doesn't matter.
 
 ## Overview
 
