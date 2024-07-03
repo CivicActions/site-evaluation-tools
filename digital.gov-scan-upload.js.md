@@ -6,17 +6,17 @@ This Node.js script downloads a CSV file from a specified URL, renames it with t
 
 ### The script performs the following steps:
 
-	1.	Downloads a CSV file from the Site Scanning page.
-	2.	Renames the file with the current date.
-	3.	Authenticates with Google Sheets using provided credentials.
-	4.	Uploads the CSV data to a new sheet in the specified Google Sheets document.
-	5.	Updates an “Introduction” sheet in the Google Sheets document with the title of the newly created sheet.
+1.	Downloads a CSV file from the Site Scanning page.
+2.	Renames the file with the current date.
+3.	Authenticates with Google Sheets using provided credentials.
+4.	Uploads the CSV data to a new sheet in the specified Google Sheets document.
+5.	Updates an “Introduction” sheet in the Google Sheets document with the title of the newly created sheet.
 
 ### Advantages
 
-	•	Data Aggregation: The data is easier to consume in a Google Sheets format than in a CSV file.
-	•	Data Integrity: Changes in the data structure can be detected, allowing for error checking.
-	•	Accountability: Highlighting agencies that are falling behind can encourage improvements. Monitoring and visibility are key.
+•	Data Aggregation: The data is easier to consume in a Google Sheets format than in a CSV file.
+•	Data Integrity: Changes in the data structure can be detected, allowing for error checking.
+•	Accountability: Highlighting agencies that are falling behind can encourage improvements. Monitoring and visibility are key.
 
 ## Google Sheets Document
 
