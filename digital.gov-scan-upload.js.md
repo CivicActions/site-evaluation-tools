@@ -26,10 +26,10 @@ The processed data is uploaded to the following Google Sheets document: [Google 
 
 ### Prerequisites
 
-1. Node.js (v16 or later recommended)
-1. npm (Node Package Manager)
-1. Google Cloud project with Google Sheets API enabled
-1. Credentials JSON file for Google Sheets API
+* Node.js (v16 or later recommended)
+* npm (Node Package Manager)
+* Google Cloud project with Google Sheets API enabled
+* Credentials JSON file for Google Sheets API
 
 ## Install
 
