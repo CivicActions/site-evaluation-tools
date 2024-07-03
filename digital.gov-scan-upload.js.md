@@ -31,7 +31,9 @@ The processed data is uploaded to the following Google Sheets document: [Google 
 * Google Cloud project with Google Sheets API enabled
 * Credentials JSON file for Google Sheets API
 
-## Install1. Download the [digital.gov-scan-upload.js](https://github.com/CivicActions/site-evaluation-tools/blob/main/digital.gov-scan-upload.js) file
+## Install
+
+1. Download the [digital.gov-scan-upload.js](https://github.com/CivicActions/site-evaluation-tools/blob/main/digital.gov-scan-upload.js) file
 1. Setup a [Google Cloud](https://developers.google.com/workspace/guides/create-project) project
 1. Enable the [Google Sheets API](https://developers.google.com/sheets)
 1. Save your [OAuth](https://developers.google.com/workspace/guides/configure-oauth-consent) Config
