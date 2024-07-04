@@ -39,19 +39,30 @@ Create and populate the unlighthouse-sites.yml file with the sites you want to s
 ## Usage
 
 ### Command-Line Arguments
-
-* --type: Type of scan (default: crawl).
-* --name: Name of the site.
-* --url: URL of the site to scan.
-* --max: Maximum number of pages to scan (default: 100).
-* --sheet_id: Google Sheets ID where the results will be uploaded.
-* --exclude: URLs to exclude from the scan.
-* --strategy: Strategy for scanning (e.g., same-hostname, sitemap).
+```
+	•	 --type: Type of scan (default: crawl).
+	•	 --name: Name of the site.
+	•	 --url: URL of the site to scan.
+	•	 --max: Maximum number of pages to scan (default: 100).
+	•	 --sheet_id: Google Sheets ID where the results will be uploaded.
+	•	 --exclude: URLs to exclude from the scan.
+	•	 --strategy: Strategy for scanning (e.g., same-hostname, sitemap).
+```
 
 ## Runing the Script
 `node unlighthouse-gTracker.js --type crawl --name Example --url https://example.com --max 100 --sheet_id <spreadsheet-id> --exclude '' --strategy same-hostname`
 
 ## Notes
 
-	•	Ensure the google-crawl.yml file exists in the same directory as this script.
-	•	The script creates a lock file (scan.lock) to prevent multiple instances from running simultaneously.
+* Ensure the google-crawl.yml file exists in the same directory as this script.
+* The script creates a lock file (scan.lock) to prevent multiple instances from running simultaneously.
+
+## Context 
+The unlighthouse-gTracker.js script relies on a YAML configuration file (unlighthouse-sites.yml) that lists the sites to be scanned. This file can be populated using the unlighthouse-sites.js script, which allows for adding new URLs and their corresponding Google Sheets information. This setup ensures that the scanning and reporting process is streamlined and organized, leveraging both scripts for effective site evaluations and accessibility checks.
+
+Repository: CivicActions/site-evaluation-tools
+
+* unlighthouse-gTracker.js: Main script for scanning and reporting.
+* unlighthouse-sites.js: Script for managing URLs and Google Sheets.
+
+Ensure to follow the installation steps and prerequisites for both scripts to utilize their full capabilities for site evaluations and accessibility checks.
