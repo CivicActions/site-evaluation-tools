@@ -21,8 +21,27 @@ Node Dependancies
 * commander: Command-line argument parsing.
 
 ### Command-Line Arguments
+```
 	•	--url: Add a single URL.
 	•	--file: Add URLs from a CSV file.
+```
 
 ### Example
 `node unlighthouse-sites.js --url https://example.com## Usage`
+
+
+## Notes
+
+	•	Ensure the unlighthouse-sites.yml file exists in the same directory as this script.
+	•	The script supports both single URL and batch URL processing via a CSV file.
+	•	Google Sheets and YAML configuration are updated only if the URL does not already exist in the YAML file.
+
+## Context
+
+The unlighthouse-gTracker.js script relies on a YAML configuration file (unlighthouse-sites.yml) that lists the sites to be scanned. This file can be populated using the unlighthouse-sites.js script, which allows for adding new URLs and their corresponding Google Sheets information. This setup ensures that the scanning and reporting process is streamlined and organized, leveraging both scripts for effective site evaluations and accessibility checks.
+
+Repository: CivicActions/site-evaluation-tools
+* unlighthouse-gTracker.js: Main script for scanning and reporting.
+* unlighthouse-sites.js: Script for managing URLs and Google Sheets.
+
+Ensure to follow the installation steps and prerequisites for both scripts to utilize their full capabilities for site evaluations and accessibility checks.
