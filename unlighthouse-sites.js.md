@@ -2,7 +2,7 @@
 
 ## Overview
 
-The unlighthouse-sites.js script processes URLs and manages Google Sheets for site evaluations. It supports adding URLs directly or from a CSV file, normalizing and checking URLs, creating Google Sheets from a template, and updating a YAML configuration file with new entries.
+The unlighthouse-sites.js script processes URLs and creates Google Sheets (from a template) to store site evaluations. New entries (with the domain, and google sheet URL) are then stored in a YAML file. It supports adding URLs directly or from a CSV file, normalizing and checking URLs, creating Google Sheets.
 
 ## Installation
 
