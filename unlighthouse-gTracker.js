@@ -96,7 +96,7 @@ function parseCSV(filePath) {
 
 require('events').EventEmitter.defaultMaxListeners = 50;  // Increase the listener limit
 
-async function runUnlighthouse(url, timeout = 10800000) { // 3 hours in milliseconds
+async function runUnlighthouse(url, timeout = 1800000) { // 30 minutes in milliseconds
     console.log(`Running Unlighthouse for ${url}...`);
     const output = [];
     const startTime = Date.now();  // Record the start time
