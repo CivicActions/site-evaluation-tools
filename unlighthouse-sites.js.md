@@ -32,9 +32,9 @@ Node Dependancies
 
 ## Notes
 
-	•	Ensure the unlighthouse-sites.yml file exists in the same directory as this script.
-	•	The script supports both single URL and batch URL processing via a CSV file.
-	•	Google Sheets and YAML configuration are updated only if the URL does not already exist in the YAML file.
+* Ensure the unlighthouse-sites.yml file exists in the same directory as this script.
+* The script supports both single URL and batch URL processing via a CSV file.
+* Google Sheets and YAML configuration are updated only if the URL does not already exist in the YAML file.
 
 ## Context
 
