@@ -8,16 +8,21 @@ The unlighthouse-sites.js script processes URLs and manages Google Sheets for si
 
 ### Prerequisites
 
-	1.	Node.js: Ensure Node.js is installed on your system. You can download it from Node.js.
-	2.	Google Cloud Platform: Set up a project and enable the Google Sheets API and Google Drive API.
-	3.	OAuth 2.0 Credentials: Create OAuth 2.0 credentials and download the credentials.json file.
+* Node.js: Ensure Node.js is installed on your system. You can download it from Node.js.
+* Google Cloud Platform: Set up a project and enable the Google Sheets API and Google Drive API.
+* OAuth 2.0 Credentials: Create OAuth 2.0 credentials and download the credentials.json file.
 
-
-node unlighthouse-sites.js --url https://example.com## Usage
+Node Dependancies
+* axios: Making HTTP requests.
+* googleapis: Interacting with Google Sheets and Drive APIs.
+* fs: File system operations.
+* js-yaml: Parsing and writing YAML files.
+* csv-parse: Parsing CSV files.
+* commander: Command-line argument parsing.
 
 ### Command-Line Arguments
 	•	--url: Add a single URL.
 	•	--file: Add URLs from a CSV file.
 
 ### Example
-``
+`node unlighthouse-sites.js --url https://example.com## Usage`
