@@ -48,6 +48,11 @@ The processed data is uploaded to the following Google Sheets document: [Google 
 ## Maintainer
 The maintainer of this script is Mike Gifford. Bugs, features and comments can be left in the issue queue. 
 
+## Todo
+* Incorporate history for: CMS, Web Metrics
+* Remove older CSV file sheets
+* Create Summary history for all sheets
+
 ## License
 
 This project is licensed under the GNU General Public License v3.0. You can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
