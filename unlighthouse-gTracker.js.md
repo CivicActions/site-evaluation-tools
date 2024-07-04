@@ -2,7 +2,7 @@
 
 ## Overview
 
-The unlighthouse-gTracker.js script automates the process of crawling and scanning websites using [Unlighthouse.dev](Unlighthouse.dev) which is a front-end for Google Lighthouse, then uploads the results to Google Sheets. This process involves parsing command-line arguments, authenticating with Google Sheets API, creating Google Sheets if they don’t exist, running the Purple-A11y tool, processing scan results, and uploading them to Google Sheets.
+The unlighthouse-gTracker.js script automates the process of crawling and scanning websites using [Unlighthouse.dev](Unlighthouse.dev) which is a front-end for [Google Lighthouse](https://developer.chrome.com/docs/lighthouse/), then uploads the results to Google Sheets. This process involves parsing command-line arguments, authenticating with Google Sheets API, creating Google Sheets if they don’t exist, running the Unlighthouse tool, processing scan results, and uploading them to Google Sheets.
 
 ## Installation
 
