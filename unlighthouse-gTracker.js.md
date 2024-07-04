@@ -12,16 +12,16 @@ The unlighthouse-gTracker.js script automates the process of crawling and scanni
 1. Google Cloud Platform: Set up a project and enable the Google Sheets API and Google Drive API.
 1. OAuth 2.0 Credentials: Create OAuth 2.0 credentials and download the credentials.json file.
 
-### Dependencies
+### Node Dependencies
 
-	•	fs: File system operations.
-	•	path: Handling file paths.
-	•	csv-parse: Parsing CSV files.
-	•	googleapis: Interacting with Google Sheets and Drive APIs.
-	•	jsdom: Parsing HTML content.
-	•	yargs: Command-line argument parsing.
-	•	child_process: Running external commands.
-	•	crypto: Generating MD5 hashes.
+* fs: File system operations.
+* path: Handling file paths.
+* sv-parse: Parsing CSV files.
+* googleapis: Interacting with Google Sheets and Drive APIs.
+* jsdom: Parsing HTML content.
+* yargs: Command-line argument parsing.
+* child_process: Running external commands.
+* crypto: Generating MD5 hashes.
 
 ### Steps
 
@@ -40,13 +40,13 @@ Create and populate the unlighthouse-sites.yml file with the sites you want to s
 
 ### Command-Line Arguments
 
-	•	--type: Type of scan (default: crawl).
-	•	--name: Name of the site.
-	•	--url: URL of the site to scan.
-	•	--max: Maximum number of pages to scan (default: 100).
-	•	--sheet_id: Google Sheets ID where the results will be uploaded.
-	•	--exclude: URLs to exclude from the scan.
-	•	--strategy: Strategy for scanning (e.g., same-hostname, sitemap).
+* --type: Type of scan (default: crawl).
+* --name: Name of the site.
+* --url: URL of the site to scan.
+* --max: Maximum number of pages to scan (default: 100).
+* --sheet_id: Google Sheets ID where the results will be uploaded.
+* --exclude: URLs to exclude from the scan.
+* --strategy: Strategy for scanning (e.g., same-hostname, sitemap).
 
 ## Runing the Script
 `node unlighthouse-gTracker.js --type crawl --name Example --url https://example.com --max 100 --sheet_id <spreadsheet-id> --exclude '' --strategy same-hostname`
