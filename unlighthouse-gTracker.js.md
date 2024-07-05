@@ -54,7 +54,7 @@ Create and populate the unlighthouse-sites.yml file with the sites you want to s
 
 ## Notes
 
-* Ensure the google-crawl.yml file exists in the same directory as this script.
+* Ensure the unlighthouse-sites.yml file exists in the same directory as this script.
 * The script creates a lock file (scan.lock) to prevent multiple instances from running simultaneously.
 
 ## Context 
