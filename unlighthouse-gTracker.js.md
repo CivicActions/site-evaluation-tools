@@ -40,13 +40,13 @@ Create and populate the unlighthouse-sites.yml file with the sites you want to s
 
 ### Command-Line Arguments
 ```
-	•	 --type: Type of scan (default: crawl).
-	•	 --name: Name of the site.
-	•	 --url: URL of the site to scan.
-	•	 --max: Maximum number of pages to scan (default: 100).
-	•	 --sheet_id: Google Sheets ID where the results will be uploaded.
-	•	 --exclude: URLs to exclude from the scan.
-	•	 --strategy: Strategy for scanning (e.g., same-hostname, sitemap).
+ --type: Type of scan (default: crawl).
+ --name: Name of the site.
+ --url: URL of the site to scan.
+ --max: Maximum number of pages to scan (default: 100).
+ --sheet_id: Google Sheets ID where the results will be uploaded.
+ --exclude: URLs to exclude from the scan.
+ --strategy: Strategy for scanning (e.g., same-hostname, sitemap).
 ```
 
 ## Runing the Script
