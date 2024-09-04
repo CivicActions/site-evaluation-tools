@@ -1,5 +1,37 @@
 #!/bin/zsh
-# unlighthouse-gTracker.sh
+#
+# Unlighthouse Google Tracker Script (unlighthouse-gTracker.sh)
+#
+# Description:
+# This script automates the process of scanning websites using the Unlighthouse tool. It reads the URLs 
+# scheduled for a specific day of the week from a YAML file, then runs Unlighthouse scans for each URL. 
+# The script also handles the cleanup of Chrome Canary processes, logs the start and end times of the 
+# script, and logs all output to a specified log file.
+#
+# Features:
+# - Extracts URLs from a YAML configuration file based on the specified day of the week.
+# - Runs the Unlighthouse scanner for each URL, logging results and errors.
+# - Uses Node.js and manages memory by forcing garbage collection after each run.
+# - Closes Chrome Canary and Chrome Helper processes after each scan to prevent resource exhaustion.
+# - Logs execution details such as Node.js version, extracted URLs, and start/end times to a log file.
+#
+# Usage:
+# - By default, the script runs for the current day of the week, but a specific day can be provided using 
+#   the -d option (e.g., `./unlighthouse-gTracker.sh -d Monday`).
+# - The script is intended to be used in a scheduled cron job to automate weekly scans for different URLs.
+#
+# License:
+# This script is licensed under the GNU General Public License v3.0.
+# You can redistribute it and/or modify it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+# implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
+# for more details.
+#
+# You should have received a copy of the GNU General Public License along with this program. If not, see
+# <https://www.gnu.org/licenses/>.
+#
 
 # Log the start time of the script
 echo "Script started at $(date)" > /Users/mgifford/CA-Sitemap-Scans/unlighthouse-gTracker.log
