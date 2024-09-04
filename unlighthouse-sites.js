@@ -1,3 +1,32 @@
+/*
+ * URL Processor and Google Sheets Manager Script
+ *
+ * Description:
+ * This Node.js script processes URLs, either provided as a single URL or from a CSV file, and interacts with Google Sheets. 
+ * It authenticates with Google Sheets API, creates a new Google Sheet from a template, and stores the relevant URL information 
+ * into a YAML file. The script is designed to check URLs, normalize them, handle redirections, and append new entries to a YAML configuration file.
+ *
+ * Features:
+ * - Processes a single URL or multiple URLs from a CSV file.
+ * - Authenticates and interacts with Google Sheets API to create new sheets from a template.
+ * - Stores URL data such as the normalized URL, sheet ID, and start date into a YAML file.
+ * - Handles URL normalization, redirections, and title extraction from the webpage.
+ * - Generates a random day of the week for scheduling purposes.
+ *
+ * This script can be used for automating URL tracking and data storage in Google Sheets, as well as maintaining an updated YAML configuration.
+ *
+ * License:
+ * This script is licensed under the GNU General Public License v3.0.
+ * You can redistribute it and/or modify it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+ * implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
+ * for more details.
+ *
+ * You should have received a copy of the GNU General Public License along with this program. If not, see
+ * <https://www.gnu.org/licenses/>.
+ */
 const axios = require('axios');
 const { google } = require('googleapis');
 const fs = require('fs');
