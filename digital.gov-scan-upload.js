@@ -41,6 +41,7 @@ const TOKEN_PATH = path.join(baseDir, "token.json");
 
 console.log('Reading credentials from:', CREDENTIALS_PATH);
 console.log('File exists:', fs.existsSync(CREDENTIALS_PATH));
+console.log("Environment variables:", process.env);
 
 const downloadAndRenameFile = async (url) => {
     console.log('Downloading file from:', url);
