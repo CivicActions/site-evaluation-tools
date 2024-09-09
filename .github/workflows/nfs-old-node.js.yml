@@ -30,4 +30,4 @@ jobs:
         cache: 'npm'
     - run: npm ci
     - run: npm install -g @unlighthouse/cli puppeteer
-    - run: npx unlighthouse-ci  --site https://www.nsf.gov.gov  --config-file .github/workflows/unlighthouse.config-nsf-old.ts
+    - run: npx unlighthouse-ci  --site https://www.nsf.gov  --config-file .github/workflows/unlighthouse.config-nsf-old.ts
