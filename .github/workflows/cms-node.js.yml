@@ -30,4 +30,5 @@ jobs:
         cache: 'npm'
     - run: npm ci
     - run: npm install -g @unlighthouse/cli puppeteer
+    - run: npm init
     - run: strace npx unlighthouse-ci  --site https://cms.gov  --config-file .github/workflows/unlighthouse.config-cms.ts
