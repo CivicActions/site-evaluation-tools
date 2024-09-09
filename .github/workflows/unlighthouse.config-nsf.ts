@@ -121,7 +121,7 @@ module.exports = {
     device: 'desktop',
     throttle: true,
     cache: true,
-    maxRoutes: 25,
+    maxRoutes: 20,
     skipJavascript: false,
     sitemap: true,
   },
