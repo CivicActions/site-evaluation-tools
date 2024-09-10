@@ -38,13 +38,5 @@ module.exports = {
     // use sitemaps - arrays are possible for specific sites https://unlighthouse.dev/api/config#scannersitemap
     sitemap: true,
   },
-  puppeteerOptions: {
-    headless: false,
-    slowMo: 250, // slow down interactions
-  },
-  puppeteerClusterOptions: {
-    // only run one worker at a time
-    concurrency: 1,
-  },
   debug: true,
 };
