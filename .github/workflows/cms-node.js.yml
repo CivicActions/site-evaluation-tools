@@ -19,8 +19,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-      env:
-          NODE_OPTIONS: --max_old_space_size=8192
     - run: npm init -y
     - run: npm install
     - name: Use Node.js ${{ matrix.node-version }}
@@ -31,3 +29,5 @@ jobs:
     - run: npm ci
     - run: npm install -g @unlighthouse/cli puppeteer
     - run: strace npx unlighthouse-ci  --site https://cms.gov  --config-file .github/workflows/unlighthouse.config-cms.ts
+     env:
+          NODE_OPTIONS: --max_old_space_size=8192
