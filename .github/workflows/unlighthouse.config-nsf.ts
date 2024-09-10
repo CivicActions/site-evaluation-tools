@@ -125,5 +125,13 @@ module.exports = {
     skipJavascript: false,
     sitemap: true,
   },
-  debug: false,
+  debug: true,
+  puppeteerOptions: {
+    headless: false,
+    slowMo: 250, // slow down interactions
+  },
+  puppeteerClusterOptions: {
+    // only run one worker at a time
+    concurrency: 1,
+  },
 };
