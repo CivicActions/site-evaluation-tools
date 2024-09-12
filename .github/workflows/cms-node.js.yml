@@ -27,8 +27,7 @@ jobs:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
     - run: npm ci
-    - run: /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=39881 --disable-extensions
     - run: npm install -g @unlighthouse/cli puppeteer
-    - run: npx unlighthouse-ci --verbose --list-trace-categories --site https://www.cms.gov/2018-vendor-presentations --config-file .github/workflows/unlighthouse.config-cms.ts
+    - run: npx unlighthouse-ci --verbose --list-trace-categories --chrome-flags="--disable-extensions" --site https://www.cms.gov/2018-vendor-presentations --config-file .github/workflows/unlighthouse.config-cms.ts
       env:
-          NODE_OPTIONS: --max_old_space_size=8192
+          NODE_OPTIONS: --max_old_space_size=8192 
