@@ -1,11 +1,9 @@
-export default {
-    puppeteerOptions: {
+module.exports = {
+  puppeteerOptions: {
         args: ["--no-sandbox"],
     },
     server: {
-        open: false,
-    },{
-module.exports = {
+        open: false,  
   site: 'cms.gov',
   scanner: {
     include: [
