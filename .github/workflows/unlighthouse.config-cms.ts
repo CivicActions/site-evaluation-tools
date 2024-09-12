@@ -38,5 +38,8 @@ module.exports = {
     // use sitemaps - arrays are possible for specific sites https://unlighthouse.dev/api/config#scannersitemap
     sitemap: true,
   },
+  ci: {
+    reporter: 'lighthouseServer'
+  },
   debug: false,
 };
