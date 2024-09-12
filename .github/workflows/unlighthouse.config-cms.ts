@@ -4,7 +4,7 @@ export default {
     },
     server: {
         open: false,
-    },
+    },{
 module.exports = {
   site: 'cms.gov',
   scanner: {
