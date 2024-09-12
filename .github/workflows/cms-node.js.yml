@@ -28,6 +28,6 @@ jobs:
         cache: 'npm'
     - run: npm ci
     - run: npm install -g @unlighthouse/cli puppeteer
-    - run: npx unlighthouse-ci --verbose --list-trace-categories --chrome-flags="--disable-extensions" --site https://www.cms.gov/2018-vendor-presentations --config-file .github/workflows/unlighthouse.config-cms.ts
+    - run: npx unlighthouse-ci --verbose --list-trace-categories --chrome-flags="--disable-extensions --remote-debugging-port=39881" --site https://www.cms.gov/2018-vendor-presentations --config-file .github/workflows/unlighthouse.config-cms.ts
       env:
           NODE_OPTIONS: --max_old_space_size=8192 
