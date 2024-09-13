@@ -5,7 +5,7 @@ module.exports = {
     concurrency: 1,
   },
   lighthouseOptions: {
-    onlyCategories: ['best-practices'],
+    onlyCategories: ['performance'],
   },
   server: {
     open: false,
