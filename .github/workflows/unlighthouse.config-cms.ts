@@ -1,8 +1,8 @@
 module.exports = {
   puppeteerOptions: {
         args: ["--no-sandbox"],
-    },
-    server: {
+      },
+  server: {
         open: false,  
   site: 'cms.gov',
   scanner: {
@@ -42,6 +42,7 @@ module.exports = {
     skipJavascript: false,
     // use sitemaps - arrays are possible for specific sites https://unlighthouse.dev/api/config#scannersitemap
     sitemap: true,
+    }
   },
   debug: false,
 };
