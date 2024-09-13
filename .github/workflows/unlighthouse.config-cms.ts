@@ -41,7 +41,7 @@ module.exports = {
     // enable the throttling mode
     throttle: true,
     // increase the maximum number of routes - https://unlighthouse.dev/api/config#scannermaxroutes
-    maxRoutes: 10,
+    maxRoutes: 500,
     // skip the javascript scan
     skipJavascript: false,
     // use sitemaps - arrays are possible for specific sites https://unlighthouse.dev/api/config#scannersitemap
