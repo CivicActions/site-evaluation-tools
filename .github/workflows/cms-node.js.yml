@@ -20,7 +20,7 @@ jobs:
 
     steps:
     - name: Collect Workflow Telemetry
-      uses: catchpoint/workflow-telemetry-action@2
+      uses: catchpoint/workflow-telemetry-action@v2
     - uses: actions/checkout@v4
     - run: npm init -y
     - run: npm install
