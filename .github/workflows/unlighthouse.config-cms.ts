@@ -1,6 +1,7 @@
 module.exports = {
   puppeteerOptions: {
         args: ["--no-sandbox"],
+        concurrency: 1,
       },
   lighthouseOptions: {
     onlyCategories: ['performance'],
