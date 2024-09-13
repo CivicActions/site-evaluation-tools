@@ -3,7 +3,7 @@ module.exports = {
         args: ["--no-sandbox"],
       },
   lighthouseOptions: {
-    onlyCategories: ['accessibility'],
+    onlyCategories: ['performance'],
   },
   server: {
         open: false,  
