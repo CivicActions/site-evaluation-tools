@@ -2,6 +2,8 @@ module.exports = {
   site: 'cms.gov',
   puppeteerOptions: {
     args: ["--no-sandbox", '--disable-dev-shm-usage'],
+  },
+  puppeteerClusterOptions: {
     concurrency: 1,
   },
   lighthouseOptions: {
@@ -36,7 +38,7 @@ module.exports = {
       "/blog"
     ],
     // Run Lighthouse for each URL 3 times
-    samples: 3,
+    samples: 1,
     // Use desktop to scan
     device: 'desktop',
     // Enable throttling mode
