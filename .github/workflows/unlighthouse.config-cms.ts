@@ -2,6 +2,9 @@ module.exports = {
   puppeteerOptions: {
         args: ["--no-sandbox"],
       },
+  lighthouseOptions: {
+    onlyCategories: ['accessibility'],
+  },
   server: {
         open: false,  
   site: 'cms.gov',
