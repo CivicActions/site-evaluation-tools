@@ -16,8 +16,11 @@ jobs:
       matrix:
         node-version: [22.x]
         # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
+     
 
     steps:
+    - name: Collect Workflow Telemetry
+      uses: catchpoint/workflow-telemetry-action@v4
     - uses: actions/checkout@v4
     - run: npm init -y
     - run: npm install
