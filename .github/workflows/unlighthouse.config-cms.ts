@@ -4,7 +4,7 @@ module.exports = {
         concurrency: 1,
       },
   lighthouseOptions: {
-    onlyCategories: ['seo'],
+    onlyCategories: ['best-practices'],
   },
   server: {
         open: false,
