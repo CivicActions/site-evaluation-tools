@@ -1,13 +1,13 @@
 module.exports = {
   puppeteerOptions: {
-        args: ["--no-sandbox"],
+        args: ["--no-sandbox", '--disable-dev-shm-usage'],
         concurrency: 1,
       },
   lighthouseOptions: {
     onlyCategories: ['accessibility'],
   },
   server: {
-        open: false,  
+        open: false,
   site: 'cms.gov',
   scanner: {
     include: [
