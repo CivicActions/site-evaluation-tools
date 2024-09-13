@@ -4,7 +4,7 @@ module.exports = {
         concurrency: 1,
       },
   lighthouseOptions: {
-    onlyCategories: ['accessibility'],
+    onlyCategories: ['performance'],
   },
   server: {
         open: false,
