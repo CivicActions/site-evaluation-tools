@@ -32,6 +32,6 @@ jobs:
     - run: npm ci
     - run: free -h
     - run: npm install -g @unlighthouse/cli puppeteer
-    - run: npx unlighthouse-ci --debug --site https://www.sec.gov #--config-file .github/workflows/unlighthouse.config-cms.ts || true
+    - run: npx unlighthouse-ci --debug --site https://www.sec.gov --config-file .github/workflows/unlighthouse.config-sec.ts || true
       env:
           NODE_OPTIONS: --max_old_space_size=10240 
