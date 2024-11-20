@@ -110,6 +110,8 @@ def get_relative_url(url, base_domain):
         return urlunparse(('', '', parsed_url.path, parsed_url.params, parsed_url.query, parsed_url.fragment))
     return url
 
+
+
 def get_images(domain, sample_size=100):
     images_data = defaultdict(lambda: {"count": 0, "alt_text": None, "title": None, "source_urls": [], "size_kb": 0, "load_time": 0})
 
@@ -126,54 +128,14 @@ def get_images(domain, sample_size=100):
 
     url_progress = tqdm(total=len(sampled_urls), desc="Processing URLs", unit="url")
 
-    def crawl_page(url):
-        url_progress.update(1)
-        start_time = time.time()
-        
-        try:
-            response = requests.get(url)
-            load_time = time.time() - start_time
-
-            if response.status_code != 200:
-                images_data[url]["load_time"] = load_time
-                return
-
-            soup = BeautifulSoup(response.text, 'html.parser')
-            img_tags = soup.find_all('img')
-            
-            for img in img_tags:
-                img_src = img.get('src')
-                if img_src:
-                    img_url = urljoin(url, img_src)
-                    if is_valid_image(img_url):
-                        image_name = img_url.split('/')[-1]
-                        alt_text = img.get('alt') if img.has_attr('alt') else None
-                        title = img.get('title') if img.has_attr('title') else None
-
-                        response = requests.head(img_url, allow_redirects=True)
-                        size = int(response.headers.get('content-length', 0)) / 1024 if response.ok else 0
-
-                        images_data[img_url]["count"] += 1
-                        images_data[img_url]["alt_text"] = alt_text
-                        images_data[img_url]["title"] = title
-                        images_data[img_url]["size_kb"] = size
-                        relative_url = get_relative_url(url, domain)
-                        images_data[img_url]["source_urls"].append(relative_url)
-
-            images_data[url]["load_time"] = load_time
-
-            time.sleep(0.5)
-
-        except Exception as e:
-            load_time = time.time() - start_time
-            images_data[url]["load_time"] = load_time
-            print(f"Failed to process {url}: {e}")
-
     for url in sampled_urls:
-        crawl_page(url)
-    
+        crawl_page(url, images_data, url_progress, domain)  # Pass domain to crawl_page
+
+    # Remove entries with count == 0
+    images_data_filtered = {k: v for k, v in images_data.items() if v["count"] > 0}
+
     rows = []
-    for img_url, data in images_data.items():
+    for img_url, data in images_data_filtered.items():
         rows.append({
             "Image_name": img_url.split('/')[-1],
             "Image_url": img_url,
@@ -187,6 +149,56 @@ def get_images(domain, sample_size=100):
     df = pd.DataFrame(rows)
     url_progress.close()
     return df
+
+
+def crawl_page(url, images_data, url_progress, domain):
+    url_progress.update(1)
+    start_time = time.time()
+    found_images = False  # Track if any valid images are found
+
+    try:
+        response = requests.get(url)
+        load_time = time.time() - start_time
+
+        if response.status_code != 200:
+            images_data[url]["load_time"] = load_time
+            return
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+        img_tags = soup.find_all('img')
+
+        for img in img_tags:
+            img_src = img.get('src')
+            if img_src:
+                img_url = urljoin(url, img_src)
+                if is_valid_image(img_url):
+                    found_images = True  # Set flag to True when at least one valid image is found
+                    image_name = img_url.split('/')[-1]
+                    alt_text = img.get('alt') if img.has_attr('alt') else None
+                    title = img.get('title') if img.has_attr('title') else None
+
+                    response = requests.head(img_url, allow_redirects=True)
+                    size = int(response.headers.get('content-length', 0)) / 1024 if response.ok else 0
+
+                    images_data[img_url]["count"] += 1
+                    images_data[img_url]["alt_text"] = alt_text
+                    images_data[img_url]["title"] = title
+                    images_data[img_url]["size_kb"] = size
+                    relative_url = get_relative_url(url, domain)
+                    images_data[img_url]["source_urls"].append(relative_url)
+
+        images_data[url]["load_time"] = load_time
+
+        if not found_images:  # Remove the page if no images are found
+            images_data.pop(url, None)
+
+        time.sleep(0.5)
+
+    except Exception as e:
+        load_time = time.time() - start_time
+        images_data[url]["load_time"] = load_time
+        print(f"Failed to process {url}: {e}")
+
 
 
 def analyze_alt_text(images_df, domain, readability_threshold=8):
@@ -226,14 +238,12 @@ def analyze_alt_text(images_df, domain, readability_threshold=8):
             readability_score = text_standard(alt_text, float_output=True)
             if readability_score > readability_threshold:
                 suggestion.append("Consider simplifying the text.")
-            else:
-                suggestion.append("Alt-text passes automated tests.")
 
-        # Only include the first suggestion if it's "Image hidden with no semantic value."
-        if suggestion and suggestion[0] == "Image hidden with no semantic value.":
-            suggestions.append(suggestion[0])
-        else:
-            suggestions.append("; ".join(suggestion) if suggestion else "")
+        # Add "Alt-text passes automated tests." only if no other suggestions are present
+        if not suggestion:
+            suggestion.append("Alt-text passes automated tests.")
+
+        suggestions.append("; ".join(suggestion) if suggestion else "")
 
     images_df['Suggestions'] = suggestions
 
