@@ -56,10 +56,14 @@ def parse_sitemap(sitemap_url):
     return urls
 
 
-def crawl_site(start_url, max_pages=100):
+def crawl_site(start_url, max_pages=100, throttle=0):
+    """
+    Crawls the site, adhering to rate limits and auto-throttling on access errors.
+    """
     visited_urls = set()
     urls_to_visit = [start_url]
     crawled_urls = set()
+    consecutive_errors = 0  # Track consecutive errors for auto-throttling
 
     print(f"Starting crawl for {start_url} with a target of {max_pages} unique HTML pages.")
     with tqdm(total=max_pages, desc="Crawling URLs", unit="url") as progress_bar:
@@ -88,7 +92,7 @@ def crawl_site(start_url, max_pages=100):
 
                     # Skip links with common non-HTML file extensions
                     if parsed_link.path.lower().endswith((
-                        '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.zip', '.rar', 
+                        '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.zip', '.rar',
                         '.jpg', '.jpeg', '.png', '.gif', '.svg', '.tiff', '.mp4', '.mp3', '.avi', '.mov'
                     )):
                         continue
@@ -97,9 +101,16 @@ def crawl_site(start_url, max_pages=100):
                     if parsed_link.netloc == urlparse(start_url).netloc and link not in visited_urls:
                         urls_to_visit.append(link)
 
+                consecutive_errors = 0  # Reset consecutive errors on success
+                time.sleep(throttle)  # Apply throttle delay
+
             except Exception as e:
                 print(f"Failed to crawl {url}: {e}")
-    
+                consecutive_errors += 1
+                if consecutive_errors > 5:
+                    throttle = min(throttle + 1, 10)  # Auto-throttle with an upper limit
+                    print(f"Auto-throttling applied. Current delay: {throttle}s")
+
     print(f"Completed crawling {len(crawled_urls)} HTML pages.")
     return list(crawled_urls)
 
@@ -112,7 +123,7 @@ def get_relative_url(url, base_domain):
 
 
 
-def get_images(domain, sample_size=100):
+def get_images(domain, sample_size=100, throttle=0):
     images_data = defaultdict(lambda: {"count": 0, "alt_text": None, "title": None, "source_urls": [], "size_kb": 0, "load_time": 0})
 
     sitemap_url = urljoin(domain, 'sitemap.xml')
@@ -121,15 +132,21 @@ def get_images(domain, sample_size=100):
     # Fallback to crawling the site if the sitemap is empty
     if not all_urls:
         print(f"Sitemap not found or invalid. Falling back to crawling the site: {domain}")
-        all_urls = crawl_site(domain, max_pages=sample_size)
+        all_urls = crawl_site(domain, max_pages=sample_size, throttle=throttle)
 
     sampled_urls = random.sample(all_urls, min(sample_size, len(all_urls)))
     print(f"Sampling {len(sampled_urls)} URLs out of {len(all_urls)} total found URLs.")
 
     url_progress = tqdm(total=len(sampled_urls), desc="Processing URLs", unit="url")
+    consecutive_errors = 0  # Track consecutive errors for auto-throttling
 
     for url in sampled_urls:
-        crawl_page(url, images_data, url_progress, domain)  # Pass domain to crawl_page
+        consecutive_errors = crawl_page(url, images_data, url_progress, domain, throttle, consecutive_errors)
+
+        # Auto-throttle if too many consecutive errors
+        if consecutive_errors > 5:
+            throttle = min(throttle + 1, 10)  # Increment throttle with an upper limit
+            print(f"Auto-throttling applied. Current delay: {throttle}s")
 
     # Remove entries with count == 0
     images_data_filtered = {k: v for k, v in images_data.items() if v["count"] > 0}
@@ -151,7 +168,10 @@ def get_images(domain, sample_size=100):
     return df
 
 
-def crawl_page(url, images_data, url_progress, domain):
+def crawl_page(url, images_data, url_progress, domain, throttle, consecutive_errors):
+    """
+    Crawls a single page, extracting image data with rate limiting and error handling.
+    """
     url_progress.update(1)
     start_time = time.time()
     found_images = False  # Track if any valid images are found
@@ -162,7 +182,7 @@ def crawl_page(url, images_data, url_progress, domain):
 
         if response.status_code != 200:
             images_data[url]["load_time"] = load_time
-            return
+            return consecutive_errors + 1  # Increment consecutive errors
 
         soup = BeautifulSoup(response.text, 'html.parser')
         img_tags = soup.find_all('img')
@@ -174,7 +194,15 @@ def crawl_page(url, images_data, url_progress, domain):
                 if is_valid_image(img_url):
                     found_images = True  # Set flag to True when at least one valid image is found
                     image_name = img_url.split('/')[-1]
-                    alt_text = img.get('alt') if img.has_attr('alt') else None
+
+                    # Check for decorative images explicitly
+                    if img.has_attr('alt') and img['alt'] == "":
+                        alt_text = ""
+                    elif img.has_attr('alt'):
+                        alt_text = img['alt']
+                    else:
+                        alt_text = None
+
                     title = img.get('title') if img.has_attr('title') else None
 
                     response = requests.head(img_url, allow_redirects=True)
@@ -184,20 +212,28 @@ def crawl_page(url, images_data, url_progress, domain):
                     images_data[img_url]["alt_text"] = alt_text
                     images_data[img_url]["title"] = title
                     images_data[img_url]["size_kb"] = size
+                    # Normalize the relative URL (remove fragments)
                     relative_url = get_relative_url(url, domain)
-                    images_data[img_url]["source_urls"].append(relative_url)
+                    normalized_url = urlparse(relative_url)._replace(fragment="").geturl()
+
+                    # Add the normalized URL to source_urls if not already added
+                    if normalized_url not in images_data[img_url]["source_urls"]:
+                        images_data[img_url]["source_urls"].append(normalized_url)
 
         images_data[url]["load_time"] = load_time
 
         if not found_images:  # Remove the page if no images are found
             images_data.pop(url, None)
 
-        time.sleep(0.5)
+        time.sleep(throttle)  # Apply throttle delay
+        return 0  # Reset consecutive errors on success
 
     except Exception as e:
         load_time = time.time() - start_time
         images_data[url]["load_time"] = load_time
         print(f"Failed to process {url}: {e}")
+        time.sleep(throttle)  # Apply throttle even on failure
+        return consecutive_errors + 1  # Increment consecutive errors
 
 
 
@@ -211,6 +247,7 @@ def analyze_alt_text(images_df, domain, readability_threshold=8):
     for _, row in images_df.iterrows():
         alt_text = row['Alt_text']
         img_url = row['Image_url']
+        title_text = row.get('Title', None)  # Fetch the Title attribute
         suggestion = []
 
         # Check for aria-hidden or hidden attributes (simulate by searching in the source HTML if available)
@@ -239,6 +276,10 @@ def analyze_alt_text(images_df, domain, readability_threshold=8):
             if readability_score > readability_threshold:
                 suggestion.append("Consider simplifying the text.")
 
+        # Add a suggestion for title text if present
+        if title_text and title_text.strip():
+            suggestion.append("Consider removing the title text.")
+
         # Add "Alt-text passes automated tests." only if no other suggestions are present
         if not suggestion:
             suggestion.append("Alt-text passes automated tests.")
@@ -253,9 +294,12 @@ def analyze_alt_text(images_df, domain, readability_threshold=8):
     print(f"Data saved to {csv_filename}")
 
 
-def main(domain, sample_size=100):
+def main(domain, sample_size=100, throttle=0):
+    """
+    Main function to collect image data and analyze alt text, with throttling.
+    """
     # Collect images and their metadata
-    images_df = get_images(domain, sample_size=sample_size)
+    images_df = get_images(domain, sample_size=sample_size, throttle=throttle)
 
     # Run the alt text analysis and append suggestions
     analyze_alt_text(images_df, domain)
@@ -264,5 +308,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Crawl a website and collect image data with alt text.")
     parser.add_argument('domain', type=str, help='The domain to crawl (e.g., https://example.com)')
     parser.add_argument('--sample_size', type=int, default=100, help='Number of URLs to sample from the sitemap')
+    parser.add_argument('--throttle', type=int, default=1, help='Throttle delay (in seconds) between requests')
     args = parser.parse_args()
-    main(args.domain, args.sample_size)
+    main(args.domain, args.sample_size, throttle=args.throttle)
