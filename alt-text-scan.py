@@ -1,3 +1,4 @@
+import os
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
@@ -16,13 +17,37 @@ from datetime import datetime
 
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.svg', '.tiff', '.avif', '.webp')
 
-def is_valid_image(url):
-    return url.lower().endswith(IMAGE_EXTENSIONS)
 
-def parse_sitemap(sitemap_url):
+def is_valid_image(url):
+    if not url:
+        return False
+    parsed_url = urlparse(url)
+    path = parsed_url.path
+    valid = path.lower().endswith(IMAGE_EXTENSIONS)
+    if not valid:
+        print(f"Skipped: Not a valid image extension - {url}")
+    return valid
+
+
+def parse_sitemap(sitemap_url, base_domain):
     """
     Parses a sitemap to extract URLs, handling sitemaps with non-XML elements.
+    Ensures specific pages are always included.
     """
+    # Define extensions to exclude
+    EXCLUDED_EXTENSIONS = ('.pdf', '.doc', '.docx', '.zip', '.rar', '.xlsx', '.ppt', '.pptx', '.xls', '.txt', '.rss')
+
+    # Pages to always include if they exist
+    ALWAYS_INCLUDE = [
+        '/', 
+        '/accessibility', 
+        '/search', 
+        '/privacy', 
+        '/security', 
+        '/contact', 
+        '/about-us'
+    ]
+
     urls = set()
     try:
         response = requests.get(sitemap_url)
@@ -40,19 +65,33 @@ def parse_sitemap(sitemap_url):
                 for elem in root.iter():
                     if elem.tag.endswith("sitemap") and elem.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc") is not None:
                         nested_sitemap = elem.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc").text
-                        urls.update(parse_sitemap(nested_sitemap))
+                        urls.update(parse_sitemap(nested_sitemap, base_domain))
                     elif elem.tag.endswith("url") and elem.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc") is not None:
                         url = elem.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc").text
-                        urls.add(url)
+                        # Skip URLs with excluded extensions
+                        if not url.lower().endswith(EXCLUDED_EXTENSIONS):
+                            urls.add(url)
             except ET.ParseError:
                 print(f"Failed to parse XML content from {sitemap_url}. Falling back to manual crawling.")
         else:
             print(f"Sitemap at {sitemap_url} is not valid XML. Falling back to manual crawling.")
             return urls
 
+        # Add always-include pages
+        for page in ALWAYS_INCLUDE:
+            full_url = urljoin(base_domain, page)
+            if full_url not in urls:
+                try:
+                    # Check if the page exists
+                    response = requests.head(full_url, timeout=5, allow_redirects=True)
+                    if response.status_code == 200 and 'text/html' in response.headers.get('Content-Type', '').lower():
+                        urls.add(full_url)
+                except Exception as e:
+                    print(f"Could not check existence of {full_url}: {e}")
+
     except Exception as e:
         print(f"Failed to parse sitemap {sitemap_url}: {e}")
-    
+
     return urls
 
 
@@ -122,173 +161,192 @@ def get_relative_url(url, base_domain):
     return url
 
 
-
 def get_images(domain, sample_size=100, throttle=0):
-    images_data = defaultdict(lambda: {"count": 0, "alt_text": None, "title": None, "source_urls": [], "size_kb": 0, "load_time": 0})
+    images_data = defaultdict(lambda: {
+        "count": 0, 
+        "alt_text": None, 
+        "title": None, 
+        "source_urls": [], 
+        "size_kb": 0
+    })
 
+    # Attempt to parse sitemap
     sitemap_url = urljoin(domain, 'sitemap.xml')
-    all_urls = list(parse_sitemap(sitemap_url))
-    
-    # Fallback to crawling the site if the sitemap is empty
+    all_urls = list(parse_sitemap(sitemap_url, domain))  # Pass both arguments
+
     if not all_urls:
-        print(f"Sitemap not found or invalid. Falling back to crawling the site: {domain}")
+        print(f"Sitemap not found or invalid. Falling back to crawling {domain}")
         all_urls = crawl_site(domain, max_pages=sample_size, throttle=throttle)
 
     sampled_urls = random.sample(all_urls, min(sample_size, len(all_urls)))
-    print(f"Sampling {len(sampled_urls)} URLs out of {len(all_urls)} total found URLs.")
+    print(f"Processing {len(sampled_urls)} sampled URLs from {len(all_urls)} total found URLs.")
 
     url_progress = tqdm(total=len(sampled_urls), desc="Processing URLs", unit="url")
-    consecutive_errors = 0  # Track consecutive errors for auto-throttling
+    consecutive_errors = 0
 
     for url in sampled_urls:
         consecutive_errors = crawl_page(url, images_data, url_progress, domain, throttle, consecutive_errors)
-
-        # Auto-throttle if too many consecutive errors
         if consecutive_errors > 5:
-            throttle = min(throttle + 1, 10)  # Increment throttle with an upper limit
+            throttle = min(throttle + 1, 10)
             print(f"Auto-throttling applied. Current delay: {throttle}s")
 
-    # Remove entries with count == 0
-    images_data_filtered = {k: v for k, v in images_data.items() if v["count"] > 0}
+    filtered_data = {k: v for k, v in images_data.items() if v["count"] > 0}
+    print(f"Processed {len(filtered_data)} valid images.")
+    return pd.DataFrame([
+        {
+            "Image_url": k,
+            "Alt_text": v["alt_text"],
+            "Title": v["title"],
+            "Count": v["count"],
+            "Source_URLs": ", ".join(v["source_urls"]),
+            "Size (KB)": round(v["size_kb"], 2)
+        }
+        for k, v in filtered_data.items()
+    ])
 
-    rows = []
-    for img_url, data in images_data_filtered.items():
-        rows.append({
-            "Image_name": img_url.split('/')[-1],
-            "Image_url": img_url,
-            "Alt_text": data["alt_text"],
-            "Title": data["title"],
-            "Count": data["count"],
-            "Source_URLs": f'"{", ".join(set(data["source_urls"]))}"',
-            "Size (KB)": round(data.get("size_kb", 0), 2),
-            "Load_Time (s)": round(data.get("load_time", 0), 2)
-        })
-    df = pd.DataFrame(rows)
-    url_progress.close()
-    return df
+
+def is_html_url(url):
+    try:
+        response = requests.head(url, timeout=5, allow_redirects=True)
+        content_type = response.headers.get('Content-Type', '').lower()
+        if 'text/html' in content_type:
+            return True
+        print(f"Skipped: Non-HTML Content-Type - {url}")
+        return False
+    except Exception as e:
+        print(f"Error while checking URL: {url}, {e}")
+        return False
 
 
 def crawl_page(url, images_data, url_progress, domain, throttle, consecutive_errors):
     """
     Crawls a single page, extracting image data with rate limiting and error handling.
     """
+    if not is_html_url(url):
+        return consecutive_errors  # # Skip this URL without incrementing error count
+
     url_progress.update(1)
     start_time = time.time()
-    found_images = False  # Track if any valid images are found
 
     try:
-        response = requests.get(url)
+        # print(f"Attempting to crawl: {url}")
+        response = requests.get(url, timeout=10)
         load_time = time.time() - start_time
 
         if response.status_code != 200:
-            images_data[url]["load_time"] = load_time
-            return consecutive_errors + 1  # Increment consecutive errors
+            print(f"Non-200 status code for {url}: {response.status_code}")
+            return consecutive_errors + 1
 
         soup = BeautifulSoup(response.text, 'html.parser')
         img_tags = soup.find_all('img')
+        print(f"Found {len(img_tags)} <img> tags on {url}")
+
+        # Keep track of seen images to skip duplicates
+        seen_images = set()
 
         for img in img_tags:
             img_src = img.get('src')
-            if img_src:
-                img_url = urljoin(url, img_src)
-                if is_valid_image(img_url):
-                    found_images = True  # Set flag to True when at least one valid image is found
-                    image_name = img_url.split('/')[-1]
+            if not img_src:
+                print(f"Skipping <img> tag with no src attribute on {url}")
+                continue
 
-                    # Check for decorative images explicitly
-                    if img.has_attr('alt') and img['alt'] == "":
-                        alt_text = ""
-                    elif img.has_attr('alt'):
-                        alt_text = img['alt']
-                    else:
-                        alt_text = None
+            img_url = urljoin(url, img_src)
+            if img_url in seen_images:
+                print(f"Duplicate image skipped: {img_url}")
+                continue
+            seen_images.add(img_url)
 
-                    title = img.get('title') if img.has_attr('title') else None
+            if is_valid_image(img_url):
+                # Retrieve and store image metadata
+                process_image(img_url, img, url, domain, images_data)
 
-                    response = requests.head(img_url, allow_redirects=True)
-                    size = int(response.headers.get('content-length', 0)) / 1024 if response.ok else 0
-
-                    images_data[img_url]["count"] += 1
-                    images_data[img_url]["alt_text"] = alt_text
-                    images_data[img_url]["title"] = title
-                    images_data[img_url]["size_kb"] = size
-                    # Normalize the relative URL (remove fragments)
-                    relative_url = get_relative_url(url, domain)
-                    normalized_url = urlparse(relative_url)._replace(fragment="").geturl()
-
-                    # Add the normalized URL to source_urls if not already added
-                    if normalized_url not in images_data[img_url]["source_urls"]:
-                        images_data[img_url]["source_urls"].append(normalized_url)
-
-        images_data[url]["load_time"] = load_time
-
-        if not found_images:  # Remove the page if no images are found
-            images_data.pop(url, None)
-
-        time.sleep(throttle)  # Apply throttle delay
-        return 0  # Reset consecutive errors on success
+        return 0
 
     except Exception as e:
-        load_time = time.time() - start_time
-        images_data[url]["load_time"] = load_time
-        print(f"Failed to process {url}: {e}")
-        time.sleep(throttle)  # Apply throttle even on failure
-        return consecutive_errors + 1  # Increment consecutive errors
+        print(f"Error processing {url}: {e}")
+        return consecutive_errors + 1
+
+
+def process_image(img_url, img, page_url, domain, images_data):
+    """
+    Processes a single image, fetching metadata and adding it to images_data.
+    """
+    try:
+        response = requests.head(img_url, timeout=5, allow_redirects=True)
+        size = int(response.headers.get('content-length', 0)) / 1024 if response.ok else 0
+    except Exception as e:
+        print(f"Failed to fetch metadata for {img_url}: {e}")
+        size = 0
+
+    alt_text = img.get('alt', None)
+    title = img.get('title', None)
+    source_url = get_relative_url(page_url, domain)
+
+    # Add image metadata to the dataset
+    images_data[img_url].update({
+        "count": images_data[img_url]["count"] + 1,
+        "alt_text": alt_text,
+        "title": title,
+        "size_kb": size,
+    })
+    if source_url not in images_data[img_url]["source_urls"]:
+        images_data[img_url]["source_urls"].append(source_url)
 
 
 
 def analyze_alt_text(images_df, domain, readability_threshold=8):
-    # Add a date column to the images DataFrame
     current_date = datetime.now().strftime("%Y-%m-%d")
     images_df["Date"] = current_date
 
     suggestions = []
 
+    # Suspicious and meaningless alt text
+    suspicious_words = ['image of', 'graphic of', 'picture of', 'photo of', 'placeholder', 'spacer', 'tbd', 'todo', 'to do']
+    meaningless_alt = ['alt', 'chart', 'decorative', 'image', 'graphic', 'photo', 'placeholder image', 'spacer', 'tbd', 'todo', 'to do', 'undefined']
+
     for _, row in images_df.iterrows():
         alt_text = row['Alt_text']
         img_url = row['Image_url']
-        title_text = row.get('Title', None)  # Fetch the Title attribute
+        title_text = row.get('Title', None)
         suggestion = []
 
-        # Check for aria-hidden or hidden attributes (simulate by searching in the source HTML if available)
-        source_html = row.get('Source_HTML', '')  # Assuming you can extract source HTML as an additional column
-        if re.search(r'aria-hidden="true"|hidden(?:="hidden")?', source_html):
-            suggestion.append("Image hidden with no semantic value.")
-        elif pd.isna(alt_text):  # No alt text provided
-            suggestion.append("No alt text provided.")
-        elif re.search(r'\.svg$', img_url, re.IGNORECASE) and (pd.isna(alt_text) or alt_text.strip() == ""):
-            suggestion.append("Check if the SVG file includes a title.")
-        elif alt_text.strip() == "" or alt_text.strip() == " ":
-            suggestion.append("Decorative image.")
+        # Large image size
+        if row['Size (KB)'] > 250:
+            suggestion.append("Consider reducing the size of the image.")
+
+        # Check for empty or decorative alt text
+        if pd.isna(alt_text):  
+            suggestion.append("No alt text provided. Clear WCAG failure.")
+        elif alt_text.strip() == "":
+            suggestion.append("Image with empty alt text. Is this a decorative image? ")
+        elif re.match(r'^\s+$', alt_text):
+            suggestion.append("Alt text contains only whitespace. Consider adding meaningful content.")
         else:
-            # Existing checks
-            if re.search(r'\.(png|jpg|jpeg|gif|svg)', alt_text, re.IGNORECASE):
-                suggestion.append("Avoid including file extensions in alt text.")
+            # Suspicious or meaningless words
+            if any(word in alt_text.lower() for word in suspicious_words):
+                suggestion.append("Avoid phrases like 'image of', 'graphic of', or 'todo' in alt text.")
+            if alt_text.lower() in meaningless_alt:
+                suggestion.append("Alt text appears to be meaningless. Replace it with descriptive content.")
+            
+            # Existing readability and phrase checks
             if len(alt_text) < 25:
                 suggestion.append("Alt text is too short. Provide more context.")
             if len(alt_text) > 250:
-                suggestion.append("Alt text is too long. Consider shortening.")
-            if re.search(r'\b(A picture of|An image of|A graphic of)\b', alt_text, re.IGNORECASE):
-                suggestion.append("Avoid phrases like 'A picture of', 'An image of', or 'A graphic of' in alt text.")
-            
-            # Check readability and apply threshold logic
+                suggestion.append("Alt text may be too long. Consider shortening.")
             readability_score = text_standard(alt_text, float_output=True)
             if readability_score > readability_threshold:
                 suggestion.append("Consider simplifying the text.")
 
-        # Add a suggestion for title text if present
+        # Title attribute check
         if title_text and title_text.strip():
-            suggestion.append("Consider removing the title text.")
+            suggestion.append("Consider removing the title text. Dupliation does not help screen reader users.")
 
-        # Add "Alt-text passes automated tests." only if no other suggestions are present
         if not suggestion:
-            suggestion.append("Alt-text passes automated tests.")
+            suggestion.append("Alt-text passes automated tests, does it make sense?")
 
         suggestions.append("; ".join(suggestion) if suggestion else "")
 
     images_df['Suggestions'] = suggestions
-
-    # Save the updated DataFrame to CSV
     csv_filename = f"{urlparse(domain).netloc}_images.csv"
     images_df.to_csv(csv_filename, index=False, encoding='utf-8')
     print(f"Data saved to {csv_filename}")
