@@ -185,6 +185,68 @@ def get_relative_url(url, base_domain):
     return url
 
 
+def is_html_url(url):
+    try:
+        response = requests.head(url, timeout=5, allow_redirects=True)
+        content_type = response.headers.get('Content-Type', '').lower()
+        if 'text/html' in content_type:
+            return True
+        print(f"Skipped: Non-HTML Content-Type - {url}")
+        return False
+    except Exception as e:
+        print(f"Error while checking URL: {url}, {e}")
+        return False
+
+
+def crawl_page(url, images_data, url_progress, domain, throttle, consecutive_errors):
+    """
+    Crawls a single page, extracting image data with rate limiting and error handling.
+    """
+    if not is_html_url(url):
+        return consecutive_errors  # # Skip this URL without incrementing error count
+
+    url_progress.update(1)
+    start_time = time.time()
+
+    try:
+        # print(f"Attempting to crawl: {url}")
+        response = requests.get(url, timeout=10)
+        load_time = time.time() - start_time
+
+        if response.status_code != 200:
+            print(f"Non-200 status code for {url}: {response.status_code}")
+            return consecutive_errors + 1
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+        img_tags = soup.find_all('img')
+        print(f"Found {len(img_tags)} <img> tags on {url}")
+
+        # Keep track of seen images to skip duplicates
+        seen_images = set()
+
+        for img in img_tags:
+            img_src = img.get('src')
+            if not img_src:
+                print(f"Skipping <img> tag with no src attribute on {url}")
+                continue
+
+            img_url = urljoin(url, img_src)
+            if img_url in seen_images:
+                print(f"Duplicate image skipped: {img_url}")
+                continue
+            seen_images.add(img_url)
+
+            if is_valid_image(img_url):
+                # Retrieve and store image metadata
+                process_image(img_url, img, url, domain, images_data)
+
+        return 0
+
+    except Exception as e:
+        print(f"Error processing {url}: {e}")
+        return consecutive_errors + 1
+
+
 def get_images(domain, sample_size=100, throttle=0, crawl_only=False):
     """
     Fetch images and their metadata from a website.
@@ -273,68 +335,6 @@ if __name__ == '__main__':
     parser.add_argument('--crawl_only', action='store_true', help='Start crawling directly without using the sitemap')
     args = parser.parse_args()
     main(args.domain, args.sample_size, throttle=args.throttle, crawl_only=args.crawl_only)
-
-
-def is_html_url(url):
-    try:
-        response = requests.head(url, timeout=5, allow_redirects=True)
-        content_type = response.headers.get('Content-Type', '').lower()
-        if 'text/html' in content_type:
-            return True
-        print(f"Skipped: Non-HTML Content-Type - {url}")
-        return False
-    except Exception as e:
-        print(f"Error while checking URL: {url}, {e}")
-        return False
-
-
-def crawl_page(url, images_data, url_progress, domain, throttle, consecutive_errors):
-    """
-    Crawls a single page, extracting image data with rate limiting and error handling.
-    """
-    if not is_html_url(url):
-        return consecutive_errors  # # Skip this URL without incrementing error count
-
-    url_progress.update(1)
-    start_time = time.time()
-
-    try:
-        # print(f"Attempting to crawl: {url}")
-        response = requests.get(url, timeout=10)
-        load_time = time.time() - start_time
-
-        if response.status_code != 200:
-            print(f"Non-200 status code for {url}: {response.status_code}")
-            return consecutive_errors + 1
-
-        soup = BeautifulSoup(response.text, 'html.parser')
-        img_tags = soup.find_all('img')
-        print(f"Found {len(img_tags)} <img> tags on {url}")
-
-        # Keep track of seen images to skip duplicates
-        seen_images = set()
-
-        for img in img_tags:
-            img_src = img.get('src')
-            if not img_src:
-                print(f"Skipping <img> tag with no src attribute on {url}")
-                continue
-
-            img_url = urljoin(url, img_src)
-            if img_url in seen_images:
-                print(f"Duplicate image skipped: {img_url}")
-                continue
-            seen_images.add(img_url)
-
-            if is_valid_image(img_url):
-                # Retrieve and store image metadata
-                process_image(img_url, img, url, domain, images_data)
-
-        return 0
-
-    except Exception as e:
-        print(f"Error processing {url}: {e}")
-        return consecutive_errors + 1
 
 
 def process_image(img_url, img, page_url, domain, images_data):
