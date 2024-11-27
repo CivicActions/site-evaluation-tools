@@ -1,95 +1,206 @@
-# Image Analysis Script for Web Accessibility
+
+# Alt-Text Scan Tool
+
+A Python script for scanning websites to evaluate the quality of `alt` text in images and generate actionable accessibility suggestions.
+
+---
 
 ## Overview
 
-This script analyzes images on a website for accessibility compliance. It identifies issues with alt text and other metadata, providing suggestions to improve accessibility. The script can parse sitemaps or crawl the website manually if a sitemap is unavailable or invalid.
+This tool crawls websites or parses their sitemap to collect images and analyze their `alt` attributes for accessibility compliance. It generates a CSV file summarizing issues, suggestions, and metadata for each image.
+
+---
 
 ## Features
 
-	•	Crawl websites for image data using sitemaps or manual crawling.
-	•	Analyze image metadata, including alt text, title, and size.
-	•	Generate detailed suggestions for improving alt text.
-	•	Exclude non-HTML content (e.g., PDFs, videos).
-	•	Output results to a CSV file with a summary of findings and recommendations.
+- **Crawl Websites**: Analyze images from websites either by crawling pages directly or parsing their sitemap.
+- **Accessibility Checks**: Detect missing, meaningless, or excessively long `alt` text.
+- **Readability Analysis**: Assess readability for `alt` text over 25 characters.
+- **Rate Limiting**: Throttle requests to avoid overloading servers.
+- **CSV Reports**: Save analysis results to a CSV file.
+- **New Features**:
+  - Added support for crawling without relying on `sitemap.xml` using the `--crawl_only` option.
+  - Readability analysis is now performed only on `alt` text longer than 25 characters.
+  - Improved handling of nested sitemaps with recursive parsing.
+  - Enhanced suggestions for WCAG compliance, including identifying decorative images and overly verbose `alt` text.
+
+---
 
 ## Installation
 
 ### Prerequisites
 
-Ensure you have Python 3.10 or later installed. Install the following Python libraries:
+1. Python 3.10 or later.
+2. Install the required Python libraries:
 
-pip install requests beautifulsoup4 pandas tqdm textblob readability-lxml textstat
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+   **Required Libraries**:
+   - `requests`
+   - `bs4` (BeautifulSoup)
+   - `pandas`
+   - `tqdm`
+   - `textstat`
+   - `textblob`
+
+---
 
 ## Usage
 
-Running the Script
+### Command-Line Arguments
 
-To run the script, use the following command:
+| Argument              | Description                                                                 |
+|-----------------------|-----------------------------------------------------------------------------|
+| `domain`             | The base domain to analyze (e.g., `https://example.com`).                   |
+| `--sample_size`      | Number of URLs to sample from the sitemap (default: 100).                   |
+| `--throttle`         | Throttle delay in seconds between requests (default: 1).                   |
+| `--crawl_only`       | Skip sitemap parsing and start crawling directly (default: `False`).        |
 
-python3.10 alt_scan.py <domain> --sample_size <number>
+---
 
-## Parameters
+### Examples
 
-	•	<domain>: The starting URL for the website (e.g., https://example.com).
-	•	--sample_size: Maximum number of unique URLs to crawl (default: 100).
+#### 1. Analyze a Site Using the Sitemap
+```bash
+python alt_text_scan.py https://example.com --sample_size 200 --throttle 2
+```
 
-Example
+This will:
+- Parse `https://example.com/sitemap.xml` to find URLs.
+- Sample up to 200 URLs for analysis.
+- Throttle requests with a 2-second delay.
 
-python3.10 alt_scan.py https://www.whitehouse.gov --sample_size 1000
+#### 2. Crawl a Site Directly
+```bash
+python alt_text_scan.py https://example.com --sample_size 200 --throttle 2 --crawl_only
+```
 
-This command crawls up to 1,000 unique pages on the specified domain and analyzes the images found.
+This will:
+- Bypass `sitemap.xml`.
+- Crawl the site starting from the homepage.
+- Analyze up to 200 pages.
+
+---
 
 ## Output
 
-The script generates two files:
-	1.	CSV File: <domain>_images.csv
-Contains detailed image metadata and suggestions for improving accessibility.
-	2.	Console Output:
-Provides progress updates and a summary of findings.
+The script generates a CSV file named after the domain being analyzed, e.g., `example.com_images.csv`. Each row corresponds to an image and contains:
 
-CSV Columns
+| Column             | Description                                                                      |
+|--------------------|----------------------------------------------------------------------------------|
+| `Image_url`       | The URL of the image.                                                           |
+| `Alt_text`        | The `alt` attribute of the image (if available).                                |
+| `Title`           | The `title` attribute of the image (if available).                              |
+| `Count`           | The number of times the image appears.                                          |
+| `Source_URLs`     | Pages where the image was found.                                                |
+| `Size (KB)`       | The size of the image in kilobytes.                                             |
+| `Suggestions`     | Recommendations for improving the `alt` text based on WCAG standards.           |
 
-	•	Image_name: The file name of the image.
-	•	Image_url: The full URL of the image.
-	•	Alt_text: The alt text associated with the image.
-	•	Title: The title attribute of the image (if any).
-	•	Count: Number of occurrences of the image.
-	•	Source_URLs: Pages where the image is found.
-	•	Size (KB): Approximate size of the image in kilobytes.
-	•	Load_Time (s): Time taken to fetch the image.
-	•	Suggestions: Accessibility improvement recommendations.
+---
 
-## Features of Analysis
+## Key Accessibility Checks
 
-The script provides actionable suggestions, including:
-	•	“Image hidden with no semantic value” if an image is marked with aria-hidden or hidden attributes.
-	•	“No alt text provided” for images without alt attributes.
-	•	“Check if the SVG file includes a title” for SVGs without meaningful descriptions.
-	•	“Decorative image” for images with empty alt attributes.
-	•	Suggestions to avoid unnecessary phrases like “A picture of” in alt text.
-	•	Readability checks using a customizable threshold.
+1. **Missing or Empty `alt` Text**:
+   - Detects images with no `alt` attribute or empty `alt` values.
+   - Suggests adding meaningful descriptions.
 
-## Troubleshooting
+2. **Readability Analysis**:
+   - Evaluates readability for `alt` text over 25 characters.
+   - Suggests simplifying overly complex text.
 
-Invalid or Missing Sitemap
+3. **Text Length**:
+   - Flags `alt` text under 25 characters as too short.
+   - Flags `alt` text over 250 characters as too verbose.
 
-If the sitemap cannot be parsed or is invalid, the script falls back to crawling the website starting from the homepage.
+4. **Meaningless `alt` Text**:
+   - Identifies generic or placeholder `alt` text (e.g., "image of", "placeholder").
 
-Excluded Files
+5. **Large Image Files**:
+   - Highlights images over 250 KB as candidates for optimization.
 
-The script excludes non-HTML content, such as:
-	•	Documents (.pdf, .docx, etc.)
-	•	Media files (.jpg, .mp4, etc.)
-	•	Archives (.zip, .rar, etc.)
+---
 
-## Logging Issues
+## Known Limitations
 
-The script outputs warnings for any URLs it fails to process.
+1. **403 Forbidden Errors**: Some servers may block automated requests. Use `--throttle` to reduce request frequency or adjust headers in the script.
+2. **Large Sitemaps**: Parsing deeply nested sitemaps may exceed the recursion depth limit. Use the `--crawl_only` option if necessary.
+3. **CAPTCHA Restrictions**: Servers using CAPTCHAs or aggressive rate-limiting may block requests.
+
+---
+
+## Script
+
+Below is the Python script:
+
+```python
+import os
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
+from urllib.parse import urljoin, urlparse, urlunparse
+import argparse
+from tqdm import tqdm
+import xml.etree.ElementTree as ET
+import random
+import time
+from collections import defaultdict
+import re
+from textblob import TextBlob
+from readability.readability import Document
+from textstat import text_standard
+from datetime import datetime
+
+IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.svg', '.tiff', '.avif', '.webp')
+
+# Function definitions
+def is_valid_image(url):
+    ...
+
+def parse_sitemap(sitemap_url, base_domain, headers=None, depth=3):
+    ...
+
+def crawl_site(start_url, max_pages=100, throttle=0):
+    ...
+
+def get_relative_url(url, base_domain):
+    ...
+
+def get_images(domain, sample_size=100, throttle=0, crawl_only=False):
+    ...
+
+def analyze_alt_text(images_df, domain, readability_threshold=8):
+    ...
+
+def process_image(img_url, img, page_url, domain, images_data):
+    ...
+
+def crawl_page(url, images_data, url_progress, domain, throttle, consecutive_errors):
+    ...
+
+# Main function
+def main(domain, sample_size=100, throttle=0, crawl_only=False):
+    ...
+    
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Crawl a website and collect image data with alt text.")
+    parser.add_argument('domain', type=str, help='The domain to crawl (e.g., https://example.com)')
+    parser.add_argument('--sample_size', type=int, default=100, help='Number of URLs to sample from the sitemap')
+    parser.add_argument('--throttle', type=int, default=1, help='Throttle delay (in seconds) between requests')
+    parser.add_argument('--crawl_only', action='store_true', help='Start crawling directly without using the sitemap')
+    args = parser.parse_args()
+    main(args.domain, args.sample_size, throttle=args.throttle, crawl_only=args.crawl_only)
+```
+
+---
 
 ## Contributing
 
-Feel free to submit issues or pull requests to improve this script.
+Contributions are welcome! Please open an issue or submit a pull request on [GitHub](https://github.com/CivicActions/site-evaluation-tools).
+
+---
 
 ## License
 
-This project is open-source and available under the MIT License.
+This project is licensed under the MIT License.
