@@ -97,7 +97,7 @@ def parse_sitemap(sitemap_url, base_domain, headers=None, depth=3):
                         if not url.lower().endswith(EXCLUDED_EXTENSIONS):
                             urls.add(url)
             except ET.ParseError:
-                print(f"Failed to parse XML content from {sitemap_url}. Falling back to manual crawling.")
+                print(f"Failed to parse XML content from {sitemap_url} - falling back to manual crawling.")
         else:
             print(f"Sitemap at {sitemap_url} is not valid XML.")
 
@@ -187,11 +187,24 @@ def get_relative_url(url, base_domain):
 
 def is_html_url(url):
     try:
-        response = requests.head(url, timeout=5, allow_redirects=True)
+        response = requests.head(url, timeout=10, allow_redirects=True)
         content_type = response.headers.get('Content-Type', '').lower()
+
+        # If Content-Type is missing, fallback to GET and inspect the content
+        if not content_type:
+            print(f"Missing Content-Type for {url} - falling back to GET request.")
+            response = requests.get(url, timeout=10, allow_redirects=True)
+            content_type = response.headers.get('Content-Type', '').lower()
+
+            # Fallback to simple HTML detection based on the content
+            if '<html' in response.text.lower():
+                print(f"Assuming HTML for {url} based on content inspection.")
+                return True
+
         if 'text/html' in content_type:
             return True
-        print(f"Skipped: Non-HTML Content-Type - {url}")
+
+        print(f"Skipped: Non-HTML Content-Type - {url} (Content-Type: {content_type}, Headers: {response.headers})")
         return False
     except Exception as e:
         print(f"Error while checking URL: {url}, {e}")
