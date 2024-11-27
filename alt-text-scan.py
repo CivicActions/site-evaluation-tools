@@ -29,10 +29,19 @@ def is_valid_image(url):
     return valid
 
 
-def parse_sitemap(sitemap_url, base_domain):
+def parse_sitemap(sitemap_url, base_domain, headers=None, depth=3):
     """
     Parses a sitemap to extract URLs, handling sitemaps with non-XML elements.
-    Ensures specific pages are always included.
+    Ensures specific pages are always included. Supports recursive sitemap parsing up to a specified depth.
+    
+    Args:
+        sitemap_url (str): URL of the sitemap to parse.
+        base_domain (str): The base domain for constructing full URLs.
+        headers (dict, optional): Headers to use for the HTTP requests (e.g., User-Agent).
+        depth (int): Maximum recursion depth for nested sitemaps.
+    
+    Returns:
+        set: A set of URLs extracted from the sitemap.
     """
     # Define extensions to exclude
     EXCLUDED_EXTENSIONS = ('.pdf', '.doc', '.docx', '.zip', '.rar', '.xlsx', '.ppt', '.pptx', '.xls', '.txt', '.rss')
@@ -49,23 +58,39 @@ def parse_sitemap(sitemap_url, base_domain):
     ]
 
     urls = set()
+    if depth <= 0:
+        print(f"Reached maximum recursion depth for {sitemap_url}.")
+        return urls
+
     try:
-        response = requests.get(sitemap_url)
+        # Set default headers if none are provided
+        if headers is None:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Referer": "https://www.hhs.gov/",
+            }
+
+        response = requests.get(sitemap_url, headers=headers, timeout=10)
+        if response.status_code == 403:
+            print(f"Access to {sitemap_url} is forbidden (403). Ensure your requests are not blocked by the server.")
+            return urls
         if response.status_code != 200:
-            print(f"Could not access {sitemap_url}")
+            print(f"Could not access {sitemap_url}, status code: {response.status_code}")
             return urls
 
         content = response.content
 
-        # Remove non-XML content (e.g., comments, stylesheets) if they exist
+        # Process valid XML sitemaps
         if content.startswith(b"<?xml") or b"<sitemapindex" in content or b"<urlset" in content:
             try:
-                # Parse the XML content
                 root = ET.fromstring(content)
                 for elem in root.iter():
+                    # Handle nested sitemaps
                     if elem.tag.endswith("sitemap") and elem.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc") is not None:
                         nested_sitemap = elem.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc").text
-                        urls.update(parse_sitemap(nested_sitemap, base_domain))
+                        urls.update(parse_sitemap(nested_sitemap, base_domain, headers, depth - 1))
+                    # Handle URLs in the sitemap
                     elif elem.tag.endswith("url") and elem.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc") is not None:
                         url = elem.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc").text
                         # Skip URLs with excluded extensions
@@ -74,8 +99,7 @@ def parse_sitemap(sitemap_url, base_domain):
             except ET.ParseError:
                 print(f"Failed to parse XML content from {sitemap_url}. Falling back to manual crawling.")
         else:
-            print(f"Sitemap at {sitemap_url} is not valid XML. Falling back to manual crawling.")
-            return urls
+            print(f"Sitemap at {sitemap_url} is not valid XML.")
 
         # Add always-include pages
         for page in ALWAYS_INCLUDE:
@@ -83,7 +107,7 @@ def parse_sitemap(sitemap_url, base_domain):
             if full_url not in urls:
                 try:
                     # Check if the page exists
-                    response = requests.head(full_url, timeout=5, allow_redirects=True)
+                    response = requests.head(full_url, headers=headers, timeout=5, allow_redirects=True)
                     if response.status_code == 200 and 'text/html' in response.headers.get('Content-Type', '').lower():
                         urls.add(full_url)
                 except Exception as e:
@@ -161,22 +185,41 @@ def get_relative_url(url, base_domain):
     return url
 
 
-def get_images(domain, sample_size=100, throttle=0):
+def get_images(domain, sample_size=100, throttle=0, crawl_only=False):
+    """
+    Fetch images and their metadata from a website.
+    
+    Args:
+        domain (str): The base domain to analyze.
+        sample_size (int): The maximum number of URLs to process.
+        throttle (int): Throttle delay between requests.
+        crawl_only (bool): If True, bypass sitemap and start crawling directly.
+    
+    Returns:
+        pd.DataFrame: Dataframe containing image metadata.
+    """
     images_data = defaultdict(lambda: {
-        "count": 0, 
-        "alt_text": None, 
-        "title": None, 
-        "source_urls": [], 
+        "count": 0,
+        "alt_text": None,
+        "title": None,
+        "source_urls": [],
         "size_kb": 0
     })
 
-    # Attempt to parse sitemap
-    sitemap_url = urljoin(domain, 'sitemap.xml')
-    all_urls = list(parse_sitemap(sitemap_url, domain))  # Pass both arguments
+    all_urls = []
 
-    if not all_urls:
-        print(f"Sitemap not found or invalid. Falling back to crawling {domain}")
+    if crawl_only:
+        print(f"Starting direct crawl for {domain} without checking sitemap...")
         all_urls = crawl_site(domain, max_pages=sample_size, throttle=throttle)
+    else:
+        # Attempt to parse sitemap
+        sitemap_url = urljoin(domain, 'sitemap.xml')
+        print(f"Trying to parse sitemap: {sitemap_url}")
+        all_urls = list(parse_sitemap(sitemap_url, domain))
+
+        if not all_urls:
+            print(f"Sitemap not found or invalid. Falling back to crawling {domain}")
+            all_urls = crawl_site(domain, max_pages=sample_size, throttle=throttle)
 
     sampled_urls = random.sample(all_urls, min(sample_size, len(all_urls)))
     print(f"Processing {len(sampled_urls)} sampled URLs from {len(all_urls)} total found URLs.")
@@ -203,6 +246,33 @@ def get_images(domain, sample_size=100, throttle=0):
         }
         for k, v in filtered_data.items()
     ])
+
+
+def main(domain, sample_size=100, throttle=0, crawl_only=False):
+    """
+    Main function to collect image data and analyze alt text, with throttling.
+    
+    Args:
+        domain (str): The base domain to analyze.
+        sample_size (int): The maximum number of URLs to process.
+        throttle (int): Throttle delay between requests.
+        crawl_only (bool): If True, bypass sitemap and start crawling directly.
+    """
+    # Collect images and their metadata
+    images_df = get_images(domain, sample_size=sample_size, throttle=throttle, crawl_only=crawl_only)
+
+    # Run the alt text analysis and append suggestions
+    analyze_alt_text(images_df, domain)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Crawl a website and collect image data with alt text.")
+    parser.add_argument('domain', type=str, help='The domain to analyze (e.g., https://example.com)')
+    parser.add_argument('--sample_size', type=int, default=100, help='Number of URLs to sample from the sitemap')
+    parser.add_argument('--throttle', type=int, default=1, help='Throttle delay (in seconds) between requests')
+    parser.add_argument('--crawl_only', action='store_true', help='Start crawling directly without using the sitemap')
+    args = parser.parse_args()
+    main(args.domain, args.sample_size, throttle=args.throttle, crawl_only=args.crawl_only)
 
 
 def is_html_url(url):
@@ -312,37 +382,38 @@ def analyze_alt_text(images_df, domain, readability_threshold=8):
 
         # Large image size
         if row['Size (KB)'] > 250:
-            suggestion.append("Consider reducing the size of the image.")
+            suggestion.append("Consider reducing the size of the image for a better user experience. ")
 
         # Check for empty or decorative alt text
         if pd.isna(alt_text):  
-            suggestion.append("No alt text provided. Clear WCAG failure.")
+            suggestion.append("No alt text was provided. Clear WCAG failure.")
         elif alt_text.strip() == "":
-            suggestion.append("Image with empty alt text. Is this a decorative image? ")
+            suggestion.append("Image with empty alt text. Check that this a decorative image? ")
         elif re.match(r'^\s+$', alt_text):
-            suggestion.append("Alt text contains only whitespace. Consider adding meaningful content.")
+            suggestion.append("Alt text contains only whitespace. Was this intentional? ")
         else:
             # Suspicious or meaningless words
             if any(word in alt_text.lower() for word in suspicious_words):
-                suggestion.append("Avoid phrases like 'image of', 'graphic of', or 'todo' in alt text.")
+                suggestion.append("Avoid phrases like 'image of', 'graphic of', or 'todo' in alt text. ")
             if alt_text.lower() in meaningless_alt:
-                suggestion.append("Alt text appears to be meaningless. Replace it with descriptive content.")
+                suggestion.append("Alt text appears to be meaningless. Replace it with descriptive content. ")
             
             # Existing readability and phrase checks
             if len(alt_text) < 25:
-                suggestion.append("Alt text is too short. Provide more context.")
+                suggestion.append("Alt text seems too short. Consider providing more context. ")
             if len(alt_text) > 250:
-                suggestion.append("Alt text may be too long. Consider shortening.")
-            readability_score = text_standard(alt_text, float_output=True)
-            if readability_score > readability_threshold:
-                suggestion.append("Consider simplifying the text.")
+                suggestion.append("Alt text may be too long. Consider shortening. ")
+            if len(alt_text) >= 25:  # Check readability only if the text is long enough
+                readability_score = text_standard(alt_text, float_output=True)
+                if readability_score > readability_threshold:
+                    suggestion.append("Consider simplifying the text.")
 
         # Title attribute check
         if title_text and title_text.strip():
-            suggestion.append("Consider removing the title text. Dupliation does not help screen reader users.")
+            suggestion.append("Consider removing the title text. Quite often title text reduces the usability for screen reader users.")
 
         if not suggestion:
-            suggestion.append("Alt-text passes automated tests, does it make sense?")
+            suggestion.append("Alt-text passes automated tests, but does it make sense to a person?")
 
         suggestions.append("; ".join(suggestion) if suggestion else "")
 
@@ -352,12 +423,18 @@ def analyze_alt_text(images_df, domain, readability_threshold=8):
     print(f"Data saved to {csv_filename}")
 
 
-def main(domain, sample_size=100, throttle=0):
+def main(domain, sample_size=100, throttle=0, crawl_only=False):
     """
     Main function to collect image data and analyze alt text, with throttling.
+    
+    Args:
+        domain (str): The base domain to analyze.
+        sample_size (int): The maximum number of URLs to process.
+        throttle (int): Throttle delay between requests.
+        crawl_only (bool): If True, bypass sitemap and start crawling directly.
     """
     # Collect images and their metadata
-    images_df = get_images(domain, sample_size=sample_size, throttle=throttle)
+    images_df = get_images(domain, sample_size=sample_size, throttle=throttle, crawl_only=crawl_only)
 
     # Run the alt text analysis and append suggestions
     analyze_alt_text(images_df, domain)
@@ -367,5 +444,6 @@ if __name__ == '__main__':
     parser.add_argument('domain', type=str, help='The domain to crawl (e.g., https://example.com)')
     parser.add_argument('--sample_size', type=int, default=100, help='Number of URLs to sample from the sitemap')
     parser.add_argument('--throttle', type=int, default=1, help='Throttle delay (in seconds) between requests')
+    parser.add_argument('--crawl_only', action='store_true', help='Start crawling directly without using the sitemap')
     args = parser.parse_args()
     main(args.domain, args.sample_size, throttle=args.throttle)
