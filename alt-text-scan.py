@@ -310,32 +310,6 @@ def get_images(domain, sample_size=100, throttle=0, crawl_only=False):
     ])
 
 
-def main(domain, sample_size=100, throttle=0, crawl_only=False):
-    """
-    Main function to collect image data and analyze alt text, with throttling.
-    
-    Args:
-        domain (str): The base domain to analyze.
-        sample_size (int): The maximum number of URLs to process.
-        throttle (int): Throttle delay between requests.
-        crawl_only (bool): If True, bypass sitemap and start crawling directly.
-    """
-    # Collect images and their metadata
-    images_df = get_images(domain, sample_size=sample_size, throttle=throttle, crawl_only=crawl_only)
-
-    # Run the alt text analysis and append suggestions
-    analyze_alt_text(images_df, domain)
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Crawl a website and collect image data with alt text.")
-    parser.add_argument('domain', type=str, help='The domain to analyze (e.g., https://example.com)')
-    parser.add_argument('--sample_size', type=int, default=100, help='Number of URLs to sample from the sitemap')
-    parser.add_argument('--throttle', type=int, default=1, help='Throttle delay (in seconds) between requests')
-    parser.add_argument('--crawl_only', action='store_true', help='Start crawling directly without using the sitemap')
-    args = parser.parse_args()
-    main(args.domain, args.sample_size, throttle=args.throttle, crawl_only=args.crawl_only)
-
 
 def process_image(img_url, img, page_url, domain, images_data):
     """
