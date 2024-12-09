@@ -315,13 +315,15 @@ def get_images(domain, sample_size=100, throttle=0, crawl_only=False):
             "Image_url": k,
             "Alt_text": v["alt_text"],
             "Title": v["title"],
+            "Longdesc": v.get("longdesc"),
+            "Aria_label": v.get("aria_label"),
+            "Aria_describedby": v.get("aria_describedby"),
             "Count": v["count"],
             "Source_URLs": ", ".join(v["source_urls"]),
             "Size (KB)": round(v["size_kb"], 2)
         }
         for k, v in filtered_data.items()
     ])
-
 
 
 def process_image(img_url, img, page_url, domain, images_data):
@@ -337,6 +339,17 @@ def process_image(img_url, img, page_url, domain, images_data):
 
     alt_text = img.get('alt', None)
     title = img.get('title', None)
+    longdesc = img.get('longdesc', None)
+    aria_label = img.get('aria-label', None)
+
+    # Extract text referenced by aria-describedby
+    aria_describedby = img.get('aria-describedby', None)
+    aria_describedby_text = None
+    if aria_describedby:
+        desc_element = img.find_parent().find(id=aria_describedby)
+        if desc_element:
+            aria_describedby_text = desc_element.get_text(strip=True)
+
     source_url = get_relative_url(page_url, domain)
 
     # Add image metadata to the dataset
@@ -344,11 +357,13 @@ def process_image(img_url, img, page_url, domain, images_data):
         "count": images_data[img_url]["count"] + 1,
         "alt_text": alt_text,
         "title": title,
+        "longdesc": longdesc,
+        "aria_label": aria_label,
+        "aria_describedby": aria_describedby_text,
         "size_kb": size,
     })
     if source_url not in images_data[img_url]["source_urls"]:
         images_data[img_url]["source_urls"].append(source_url)
-
 
 
 def analyze_alt_text(images_df, domain, readability_threshold=8):
