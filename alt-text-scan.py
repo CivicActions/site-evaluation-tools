@@ -10,12 +10,26 @@ import random
 import time
 from collections import defaultdict
 import re
-from textblob import TextBlob
-from readability.readability import Document
+import nltk
+from nltk.tokenize import word_tokenize, sent_tokenize
+from nltk.corpus import stopwords
 from textstat import text_standard
 from datetime import datetime
 
+# Download NLTK resources
+nltk.download('punkt', force=True)
+nltk.download('stopwords')
+
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.svg', '.tiff', '.avif', '.webp')
+
+def text_analysis(alt_text):
+    if not alt_text or not alt_text.strip():
+        return 0, 0
+    words = re.findall(r'\b\w+\b', alt_text)
+    sentences = re.split(r'[.!?]', alt_text)
+    num_words = len(words)
+    num_sentences = len([s for s in sentences if s.strip()])
+    return num_words, num_sentences
 
 
 def is_valid_image(url):
@@ -366,7 +380,8 @@ def process_image(img_url, img, page_url, domain, images_data):
         images_data[img_url]["source_urls"].append(source_url)
 
 
-def analyze_alt_text(images_df, domain, readability_threshold=8):
+
+def analyze_alt_text(images_df, domain, readability_threshold=20):
     current_date = datetime.now().strftime("%Y-%m-%d")
     images_df["Date"] = current_date
 
@@ -400,15 +415,14 @@ def analyze_alt_text(images_df, domain, readability_threshold=8):
             if alt_text.lower() in meaningless_alt:
                 suggestion.append("Alt text appears to be meaningless. Replace it with descriptive content. ")
             
-            # Existing readability and phrase checks
+            # Text analysis
+            words, sentences = text_analysis(alt_text)
             if len(alt_text) < 25:
                 suggestion.append("Alt text seems too short. Consider providing more context. ")
             if len(alt_text) > 250:
                 suggestion.append("Alt text may be too long. Consider shortening. ")
-            if len(alt_text) >= 25:  # Check readability only if the text is long enough
-                readability_score = text_standard(alt_text, float_output=True)
-                if readability_score > readability_threshold:
-                    suggestion.append("Consider simplifying the text.")
+            if words / max(sentences, 1) > readability_threshold:
+                suggestion.append("Consider simplifying the text.")
 
         # Title attribute check
         if title_text and title_text.strip():
