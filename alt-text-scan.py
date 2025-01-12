@@ -13,12 +13,23 @@ import re
 import nltk
 from nltk.tokenize import word_tokenize, sent_tokenize
 from nltk.corpus import stopwords
+from nltk.data import find
 from textstat import text_standard
 from datetime import datetime
 
-# Download NLTK resources
-nltk.download('punkt', force=True)
-nltk.download('stopwords')
+# Check if 'punkt' tokenizer is already downloaded
+try:
+    find('tokenizers/punkt')
+except LookupError:
+    print("'punkt' not found. Downloading...")
+    nltk.download('punkt')
+
+# Check if 'stopwords' is already downloaded
+try:
+    find('corpora/stopwords')
+except LookupError:
+    print("'stopwords' not found. Downloading...")
+    nltk.download('stopwords')
 
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.svg', '.tiff', '.avif', '.webp')
 
