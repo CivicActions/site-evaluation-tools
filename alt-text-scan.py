@@ -6,10 +6,12 @@ from urllib.parse import urljoin, urlparse, urlunparse
 import argparse
 from tqdm import tqdm
 import xml.etree.ElementTree as ET
+import json
 import random
 import time
 from collections import defaultdict
 import re
+from feedparser import parse
 import nltk
 from nltk.tokenize import word_tokenize, sent_tokenize
 from nltk.corpus import stopwords
@@ -53,6 +55,53 @@ def is_valid_image(url):
         print(f"Skipped: Not a valid image extension - {url}")
     return valid
 
+# Function to extract URLs from a CSV file
+def extract_urls_from_csv(file_path):
+    try:
+        df = pd.read_csv(file_path)
+        return df['URL'].dropna().tolist() if 'URL' in df.columns else []
+    except Exception as e:
+        print(f"Error reading CSV file {file_path}: {e}")
+        return []
+
+# Function to extract URLs from a JSON file
+def extract_urls_from_json(file_path):
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            data = json.load(file)
+            if isinstance(data, list):
+                return [url for url in data if isinstance(url, str)]
+            elif isinstance(data, dict) and 'urls' in data:
+                return data['urls']
+            else:
+                print(f"Invalid JSON structure in {file_path}.")
+                return []
+    except Exception as e:
+        print(f"Error reading JSON file {file_path}: {e}")
+        return []
+
+# Function to extract URLs from an RSS feed
+def extract_urls_from_rss(feed_url):
+    try:
+        feed = parse(feed_url)
+        return [entry.link for entry in feed.entries if 'link' in entry]
+    except Exception as e:
+        print(f"Error parsing RSS feed {feed_url}: {e}")
+        return []
+
+# Function to parse a sitemap and extract URLs
+def extract_urls_from_sitemap(sitemap_url):
+    urls = set()
+    try:
+        response = requests.get(sitemap_url, timeout=10)
+        if response.status_code != 200:
+            print(f"Could not access {sitemap_url}, status code: {response.status_code}")
+            return list(urls)
+        root = ET.fromstring(response.content)
+        urls.update(elem.text for elem in root.iter() if elem.tag.endswith("loc"))
+    except Exception as e:
+        print(f"Error parsing sitemap {sitemap_url}: {e}")
+    return list(urls)
 
 def parse_sitemap(sitemap_url, base_domain, headers=None, depth=3):
     """
@@ -316,6 +365,7 @@ def get_images(domain, sample_size=100, throttle=0, crawl_only=False):
         sitemap_url = urljoin(domain, 'sitemap.xml')
         print(f"Trying to parse sitemap: {sitemap_url}")
         all_urls = list(parse_sitemap(sitemap_url, domain))
+        print(f"Found {len(all_urls)} URLs in sitemap.")
 
         if not all_urls:
             print(f"Sitemap not found or invalid. Falling back to crawling {domain}")
@@ -392,7 +442,12 @@ def process_image(img_url, img, page_url, domain, images_data):
 
 
 
-def analyze_alt_text(images_df, domain, readability_threshold=20):
+def analyze_alt_text(images_df, domain_or_file, readability_threshold=20):
+    # Skip analysis if no data is available
+    if images_df.empty:
+        print("No image data available for analysis. Exiting.")
+        return
+
     current_date = datetime.now().strftime("%Y-%m-%d")
     images_df["Date"] = current_date
 
@@ -403,29 +458,26 @@ def analyze_alt_text(images_df, domain, readability_threshold=20):
     meaningless_alt = ['alt', 'chart', 'decorative', 'image', 'graphic', 'photo', 'placeholder image', 'spacer', 'tbd', 'todo', 'to do', 'undefined']
 
     for _, row in images_df.iterrows():
-        alt_text = row['Alt_text']
-        img_url = row['Image_url']
-        title_text = row.get('Title', None)
+        alt_text = row.get('Alt_text', "")
+        img_url = row.get('Image_url', "")
+        title_text = row.get('Title', "") or ""  # Ensure title_text is not None
+        size_kb = row.get('Size (KB)', 0)
         suggestion = []
 
         # Large image size
-        if row['Size (KB)'] > 250:
+        if isinstance(size_kb, (int, float)) and size_kb > 250:
             suggestion.append("Consider reducing the size of the image for a better user experience. ")
 
         # Check for empty or decorative alt text
-        if pd.isna(alt_text):  
+        if pd.isna(alt_text) or not alt_text.strip():
             suggestion.append("No alt text was provided. Clear WCAG failure.")
-        elif alt_text.strip() == "":
-            suggestion.append("Image with empty alt text. Check that this a decorative image? ")
-        elif re.match(r'^\s+$', alt_text):
-            suggestion.append("Alt text contains only whitespace. Was this intentional? ")
         else:
             # Suspicious or meaningless words
             if any(word in alt_text.lower() for word in suspicious_words):
                 suggestion.append("Avoid phrases like 'image of', 'graphic of', or 'todo' in alt text. ")
             if alt_text.lower() in meaningless_alt:
                 suggestion.append("Alt text appears to be meaningless. Replace it with descriptive content. ")
-            
+
             # Text analysis
             words, sentences = text_analysis(alt_text)
             if len(alt_text) < 25:
@@ -436,41 +488,119 @@ def analyze_alt_text(images_df, domain, readability_threshold=20):
                 suggestion.append("Consider simplifying the text.")
 
         # Title attribute check
-        if title_text and title_text.strip():
+        if title_text.strip():  # Safely handle cases where title_text is None
             suggestion.append("Consider removing the title text. Quite often title text reduces the usability for screen reader users.")
 
         if not suggestion:
             suggestion.append("Alt-text passes automated tests, but does it make sense to a person?")
 
-        suggestions.append("; ".join(suggestion) if suggestion else "")
+        suggestions.append("; ".join(suggestion))
 
     images_df['Suggestions'] = suggestions
-    csv_filename = f"{urlparse(domain).netloc}_images.csv"
-    images_df.to_csv(csv_filename, index=False, encoding='utf-8')
-    print(f"Data saved to {csv_filename}")
+
+    # Generate output filename
+    base_name = os.path.basename(domain_or_file)  # Get the base file name (e.g., cms-most-popular.json)
+    name_without_ext = os.path.splitext(base_name)[0]  # Remove file extension (e.g., cms-most-popular)
+    output_file = f"{name_without_ext}_images.csv"  # Append "_images.csv"
+
+    # Save to CSV
+    images_df.to_csv(output_file, index=False, encoding='utf-8')
+    print(f"Data saved to {output_file}")
 
 
-def main(domain, sample_size=100, throttle=0, crawl_only=False):
+def main(sample_size=100, throttle=0, crawl_only=False):
     """
     Main function to collect image data and analyze alt text, with throttling.
-    
-    Args:
-        domain (str): The base domain to analyze.
-        sample_size (int): The maximum number of URLs to process.
-        throttle (int): Throttle delay between requests.
-        crawl_only (bool): If True, bypass sitemap and start crawling directly.
     """
-    # Collect images and their metadata
-    images_df = get_images(domain, sample_size=sample_size, throttle=throttle, crawl_only=crawl_only)
+    urls = []
 
-    # Run the alt text analysis and append suggestions
-    analyze_alt_text(images_df, domain)
+    # Extract URLs from input sources
+    if args.csv:
+        urls = extract_urls_from_csv(args.csv)
+        print(f"Extracted {len(urls)} URLs from CSV.")
+        input_file = args.csv
+    elif args.json:
+        urls = extract_urls_from_json(args.json)
+        print(f"Extracted {len(urls)} URLs from JSON.")
+        input_file = args.json
+    elif args.rss:
+        urls = extract_urls_from_rss(args.rss)
+        print(f"Extracted {len(urls)} URLs from RSS feed.")
+        input_file = args.rss
+    elif args.sitemap:
+        urls = extract_urls_from_sitemap(args.sitemap)
+        print(f"Extracted {len(urls)} URLs from Sitemap.")
+        input_file = args.sitemap
+    elif args.domain:
+        urls = crawl_site(args.domain, max_pages=sample_size, throttle=throttle)
+        print(f"Crawled {len(urls)} URLs from domain.")
+        input_file = args.domain  # Use the domain name as a placeholder
+
+    if not urls:
+        print("No URLs found. Exiting.")
+        exit(1)
+
+    print(f"Processing {len(urls)} URLs...")
+
+    # Crawl and parse each page to extract images
+    images_data = defaultdict(lambda: {
+        "count": 0,
+        "alt_text": None,
+        "title": None,
+        "source_urls": [],
+        "size_kb": 0
+    })
+    for url in tqdm(urls, desc="Crawling URLs for images", unit="url"):
+        try:
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200 and 'text/html' in response.headers.get('Content-Type', '').lower():
+                soup = BeautifulSoup(response.text, 'html.parser')
+                img_tags = soup.find_all('img')
+                for img in img_tags:
+                    img_src = img.get('src')
+                    if img_src:
+                        img_url = urljoin(url, img_src)
+                        process_image(img_url, img, url, args.domain if args.domain else "unknown", images_data)
+            else:
+                print(f"Skipped non-HTML URL: {url}")
+        except Exception as e:
+            print(f"Failed to crawl {url}: {e}")
+
+    # Convert images_data to DataFrame
+    filtered_data = {k: v for k, v in images_data.items() if v["count"] > 0}
+    images_df = pd.DataFrame([
+        {
+            "Image_url": k,
+            "Alt_text": v["alt_text"],
+            "Title": v["title"],
+            "Longdesc": v.get("longdesc"),
+            "Aria_label": v.get("aria_label"),
+            "Aria_describedby": v.get("aria_describedby"),
+            "Count": v["count"],
+            "Source_URLs": ", ".join(v["source_urls"]),
+            "Size (KB)": round(v["size_kb"], 2)
+        }
+        for k, v in filtered_data.items()
+    ])
+
+    # Run analysis
+    print(f"Running analysis on {len(images_df)} images...")
+    analyze_alt_text(images_df, input_file)
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Crawl a website and collect image data with alt text.")
-    parser.add_argument('domain', type=str, help='The domain to crawl (e.g., https://example.com)')
-    parser.add_argument('--sample_size', type=int, default=100, help='Number of URLs to sample from the sitemap')
-    parser.add_argument('--throttle', type=int, default=1, help='Throttle delay (in seconds) between requests')
-    parser.add_argument('--crawl_only', action='store_true', help='Start crawling directly without using the sitemap')
+    parser = argparse.ArgumentParser(description="Scan a website or file for alt text analysis.")
+    parser.add_argument("-s", "--sample_size", type=int, default=100, help="Number of URLs to sample (default: 100).")
+    parser.add_argument("-t", "--throttle", type=int, default=1, help="Throttle delay between requests (default: 1).")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("-c", "--csv", help="Path to a CSV file containing URLs.")
+    group.add_argument("-j", "--json", help="Path to a JSON file containing URLs.")
+    group.add_argument("-r", "--rss", help="RSS feed URL to extract URLs.")
+    group.add_argument("-x", "--sitemap", help="Sitemap URL to extract URLs.")
+    group.add_argument("-d", "--domain", help="Domain to crawl for URLs.")
     args = parser.parse_args()
-    main(args.domain, args.sample_size, throttle=args.throttle)
+
+    # Debugging: Print parsed arguments
+    print(f"Parsed arguments: {args}")
+
+    # Call the main function
+    main(sample_size=args.sample_size, throttle=args.throttle, crawl_only=False)
