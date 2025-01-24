@@ -28,7 +28,7 @@ def add_image_preview(data):
     for row in data:
         image_url = row.get("Image_url", "")
         if image_url:
-            row["Image Preview"] = f'=IMAGE("{image_url}")'
+            row["Image Preview"] = f'=IMAGE("{image_url}")'  # No extra quote added here
         else:
             row["Image Preview"] = "No Image URL"
 
@@ -47,22 +47,35 @@ def save_csv(file_path, data, fieldnames):
 
 # Generate alt text using the Hugging Face model
 def generate_alt_text(image_url, pages, alt_text, title_text, instructions):
+    # Provide default values for NoneType inputs
+    pages = pages or "No associated pages available"
+    alt_text = alt_text or "No alt text provided"
+    title_text = title_text or "No title text provided"
+    
     # Construct the prompt
     prompt = (
+        "I would like to have alternative text for the image below that complies with WCAG 1.1.1 for accessibility."
+        "There are good examples of how to do this from the US Government: https://www.section508.gov/create/alternative-text/"
+        "And also from accessibility experts WebAim: https://webaim.org/techniques/alttext/"
+        "And also from Harvard University: https://accessibility.huit.harvard.edu/describe-content-images"
         f"Describe the image at this URL: {image_url}.\n"
-        f"There may be valuable keywords in alt text: '{alt_text:20} (truncated to avoid bias).'\n"
-        f"There may also be valuable keywords in title text: '{title_text:10} (truncated to avoid bias).'\n"
-        f"The description should focus on the visual content of the image and what information might add to a page.\n"
-        f"If the image is a a graph or chart, try to describe it.\n"
-        f"If the image on the {pages[:5]} (truncated to avoid bias) is within a link, consider what it links to. The link name won't be important, but we should be describing what happens if a user clicks on it.\n"
-        f"Limit reliance on text or context from the following pages: {pages[:10]} (truncated to avoid bias).\n"
-        f"Avoide phrases like: 'Image of' or 'this is a png'. Screen reader users will already know it is an image, so it is redundant."
-        f"{instructions}"
+        "Please review the current alt text and title text provided for the image. "
+        "If they are sufficient and accurate, validate them. "
+        f"Current alt text: '{alt_text[:20]}'\n"
+        f"Current title text: '{title_text[:10]}'\n"
+        "If they are not helpful, generate a concise and accurate alt text that focuses on describing the visual elements of the image. "
+        "The description should focus on the visual content of the image and what information it might add to a page. \n"
+        "Alt text should not include file names, although the filename in the URL may give you some intention of the author about why they chose the file"
+        "Alt text should not include suspicious words like: 'image of', 'graphic of', 'picture of', 'photo of', 'placeholder', 'spacer', 'tbd', 'todo', 'to do'"
+        "Alt text should avoid using meaningless words like 'alt', 'chart', 'decorative', 'image', 'graphic', 'photo', 'placeholder image', 'spacer', 'tbd', 'todo', 'to do', 'undefined'"
+        f"Limit reliance on text or context from the following pages: {pages[:10]}.\n"
+        f"Instructions: {instructions}\n"
     )
     try:
         logging.debug(f"Generating alt text for URL: {image_url}")
         result = generator(prompt, max_length=100)[0]["generated_text"]
-        logging.debug(f"Generated alt text: {result}")
+        # logging.debug(f"Generated alt text: {result}")
+        logging.debug(f"DEBUG: Row {idx + 1} values - Image URL: {image_url}, Alt Text: {alt_text}, Title Text: {title_text}, Pages: {pages}")
         return result.strip()
     except Exception as e:
         logging.error(f"Error generating alt text for {image_url}: {e}")
@@ -75,12 +88,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-g",
         "--generate-instructions",
-        default=(
-            "Please review the current alt text and title text provided for the image. "
-            "If they are sufficient and accurate, validate them. "
-            "If they are not helpful, generate a concise and accurate alt text that focuses on describing the visual elements of the image. "
-            "This alt text must comply with WCAG 1.1.1 for accessibility."
-        ),
+        default=(""),
         help="Custom instructions for generating alt text.",
     )
 
@@ -97,16 +105,17 @@ if __name__ == "__main__":
     for idx, row in enumerate(data):
         logging.info(f"Processing row {idx + 1} of {len(data)}...")
         suggestion = row.get("Suggestions", "")
-        if suggestion != "Alt-text passes automated tests, but does it make sense to a person?":
-            image_url = row.get("Image_url", "")
-            pages = row.get("Source_URLs", "")
-            alt_text = row.get("Alt_text", "")
-            title_text = row.get("Title", "")
-            if not image_url:
-                logging.warning(f"Row {idx + 1} is missing an Image URL. Skipping.")
-                row["Generated Alt Text"] = "Error: Missing image URL"
-                continue
-            row["Generated Alt Text"] = generate_alt_text(image_url, pages, alt_text, title_text, instructions)
+        image_url = row.get("Image_url", "")
+        if not image_url:
+            logging.warning(f"Row {idx + 1} is missing an Image URL. Skipping.")
+            row["Generated Alt Text"] = "Error: Missing image URL"
+            continue
+
+        # Get other fields, providing defaults for NoneType
+        pages = row.get("Source_URLs", "")
+        alt_text = row.get("Alt_text", "")
+        title_text = row.get("Title", "")
+        row["Generated Alt Text"] = generate_alt_text(image_url, pages, alt_text, title_text, instructions)
 
     # Add image preview column
     add_image_preview(data)
