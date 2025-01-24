@@ -4,28 +4,27 @@ This Python script is designed to generate meaningful alternative text (alt text
 
 **Features**
 
-	•	Generates alt text for images based on their URL, associated pages, and current alt/title text.
-
-	•	Evaluates the existing alt and title text and validates or enhances it.
-
-	•	Adds a preview column to display images in tools like Google Sheets.
-
-	•	Supports logging for real-time debugging.
-
-	•	Outputs a CSV file with enhanced alt text and image preview formulas.
+* Generates alt text for images based on their URL, associated pages, and current alt/title text.
+* Evaluates the existing alt and title text and validates or enhances it.
+* Adds a preview column to display images in tools like Google Sheets.
+* Supports logging for real-time debugging.
+* Outputs a CSV file with enhanced alt text and image preview formulas.
 
 **Requirements**
 
 **1\. Python Version**
 
-	•	Python 3.9 or later.
+* Python 3.9 or later.
+* The script depends on the following libraries:
+- `transformers`: For text generation using Hugging Face models.
+- `torch`: Required for PyTorch, the backend for Hugging Face.
 
 **2\. Required Libraries**
 
 Install the required Python libraries using pip:
 
 ```
-pip install transformers
+pip install transformers torch
 ```
 
 If you plan to export to Excel (optional):
@@ -36,15 +35,27 @@ pip install openpyxl
 
 **Installation**
 
-	1\.	Clone the repository or download the script file.
-
-	2\.	Install the required libraries:
+1.	Clone the repository or download the script file.
+2.	Install the required libraries:
 
 ```
 pip install transformers openpyxl
 ```
 
 	3\.	Ensure your environment has network access to download the Hugging Face model (flan-t5-large).
+
+**Alternate Installation**
+
+1. Set Up a Python Virtual Environment
+It is recommended to use a virtual environment to avoid conflicts with system-wide Python packages. To set up a virtual environment:
+
+```bash
+# Create a virtual environment
+python3 -m venv venv
+
+# Activate the virtual environment
+source venv/bin/activate  # On macOS/Linux
+venv\Scripts\activate     # On Windows
 
 **Usage**
 
@@ -164,4 +175,8 @@ brew install openssl
 	•	Enhanced visualization in Excel (e.g., embedded images instead of formulas).
 
 	•	Integration with image-captioning models like BLIP.
+
+**License**
+
+This project is licensed under the MIT License. See the LICENSE file for details.
 
