@@ -72,7 +72,7 @@ def generate_alt_text(image_url, pages, alt_text, title_text, instructions):
         f"Instructions: {instructions}\n"
     )
     try:
-        logging.debug(f"Generating alt text for URL: {image_url}")
+        # logging.debug(f"Generating alt text for URL: {image_url}")
         result = generator(prompt, max_length=100)[0]["generated_text"]
         # logging.debug(f"Generated alt text: {result}")
         logging.debug(f"DEBUG: Row {idx + 1} values - Image URL: {image_url}, Alt Text: {alt_text}, Title Text: {title_text}, Pages: {pages}")
