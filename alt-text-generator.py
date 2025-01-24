@@ -24,13 +24,11 @@ def load_csv(file_path):
         logging.error(f"Failed to load CSV file: {e}")
         raise
 
+# Add image preview
 def add_image_preview(data):
     for row in data:
         image_url = row.get("Image_url", "")
-        if image_url:
-            row["Image Preview"] = f'=IMAGE("{image_url}")'  # No extra quote added here
-        else:
-            row["Image Preview"] = "No Image URL"
+        row["Image Preview"] = f'=IMAGE("{image_url}")' if image_url else "No Image URL"
 
 # Define a function to save the CSV file
 def save_csv(file_path, data, fieldnames):
@@ -45,7 +43,17 @@ def save_csv(file_path, data, fieldnames):
         logging.error(f"Failed to save CSV file: {e}")
         raise
 
-# Generate alt text using the Hugging Face model
+# Post-process generated text
+def post_process_alt_text(generated_text):
+    unhelpful_phrases = [
+        "The image is", "This is an image of", "The alt text is",
+        "file with", "a jpg file", "a png file"
+    ]
+    for phrase in unhelpful_phrases:
+        generated_text = generated_text.replace(phrase, "").strip()
+    return generated_text.strip(". ")
+
+# Generate alt text
 def generate_alt_text(image_url, pages, alt_text, title_text, instructions):
     # Provide default values for NoneType inputs
     pages = pages or "No associated pages available"
@@ -72,7 +80,7 @@ def generate_alt_text(image_url, pages, alt_text, title_text, instructions):
         f"Instructions: {instructions}\n"
     )
     try:
-        # logging.debug(f"Generating alt text for URL: {image_url}")
+        logging.debug(f"Generating alt text for URL: {image_url}")
         result = generator(prompt, max_length=100)[0]["generated_text"]
         # logging.debug(f"Generated alt text: {result}")
         logging.debug(f"DEBUG: Row {idx + 1} values - Image URL: {image_url}, Alt Text: {alt_text}, Title Text: {title_text}, Pages: {pages}")
@@ -81,6 +89,7 @@ def generate_alt_text(image_url, pages, alt_text, title_text, instructions):
         logging.error(f"Error generating alt text for {image_url}: {e}")
         return f"Error generating alt text: {e}"
 
+
 # Main function
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate alt text for images based on a CSV file.")
@@ -88,10 +97,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "-g",
         "--generate-instructions",
-        default=(""),
+        default="Provide meaningful, concise alternative text for images, adhering to accessibility standards (WCAG 1.1.1).",
         help="Custom instructions for generating alt text.",
     )
-
     args = parser.parse_args()
 
     input_csv = args.csv
@@ -104,21 +112,22 @@ if __name__ == "__main__":
     logging.info("Processing rows in the CSV file...")
     for idx, row in enumerate(data):
         logging.info(f"Processing row {idx + 1} of {len(data)}...")
-        suggestion = row.get("Suggestions", "")
         image_url = row.get("Image_url", "")
         if not image_url:
             logging.warning(f"Row {idx + 1} is missing an Image URL. Skipping.")
             row["Generated Alt Text"] = "Error: Missing image URL"
             continue
 
-        # Get other fields, providing defaults for NoneType
+        # Retrieve other fields
         pages = row.get("Source_URLs", "")
         alt_text = row.get("Alt_text", "")
         title_text = row.get("Title", "")
+
+        # Generate alt text
         row["Generated Alt Text"] = generate_alt_text(image_url, pages, alt_text, title_text, instructions)
 
-    # Add image preview column
-    add_image_preview(data)
+    # Add image preview
+    # add_image_preview(data)
 
     # Save updated CSV
     output_csv = input_csv.replace(".csv", "_with_alt_text.csv")
