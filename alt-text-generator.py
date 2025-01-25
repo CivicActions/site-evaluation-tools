@@ -30,6 +30,22 @@ PROBLEMATIC_SUGGESTIONS = [
 # logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
+def check_image_exists(image_url):
+    """
+    Check if the image URL exists by making a HEAD request to minimize bandwidth usage.
+    Returns True if the image exists, False otherwise.
+    """
+    try:
+        response = requests.head(image_url, timeout=10)
+        if response.status_code == 200:
+            return True
+        else:
+            logging.warning(f"Image not found or inaccessible: {image_url} (Status: {response.status_code})")
+            return False
+    except Exception as e:
+        logging.error(f"Error checking image existence for {image_url}: {e}")
+        return False
+
 def extract_text_with_ocr(image_url):
     try:
         # Fetch the image
@@ -136,7 +152,12 @@ def generate_alt_text(image_url, alt_text="", title_text=""):
         # Skip SVG files
         if image_url.lower().endswith(".svg"):
             logging.info(f"Skipping SVG file: {image_url}")
-            return ""
+            return "Skipped: SVG file"
+
+        # Check if the image exists
+        if not check_image_exists(image_url):
+            logging.info(f"Image not found or inaccessible: {image_url}")
+            return "404 Image Not Found"
 
         # Check if the image is text-heavy using OCR
         ocr_text = extract_text_with_ocr(image_url)
@@ -200,7 +221,7 @@ for idx, row in enumerate(tqdm(data, desc="Processing images", unit="image")):
         row["Generated Alt Text"] = generate_alt_text(image_url)
     else:
         logging.info(f"Alt text for row {idx + 1} seems fine. Skipping generation.")
-        row["Generated Alt Text"] = ""
+        row["Generated Alt Text"] = "Skipped: Alt text sufficient"
 
 # Save updated CSV
 output_csv = input_csv.replace(".csv", "_with_alt_text.csv")
