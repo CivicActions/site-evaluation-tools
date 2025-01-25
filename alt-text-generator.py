@@ -56,18 +56,35 @@ def save_csv(file_path, data, fieldnames):
         logging.error(f"Failed to save CSV file: {e}")
         raise
 
-# Post-process generated text
-def post_process_alt_text(generated_text):
+def clean_and_post_process_alt_text(generated_text):
+    """
+    Cleans and post-processes generated alt text by removing unhelpful phrases, 
+    duplicate words, and ensuring proper sentence case.
+    """
+    # List of unhelpful phrases to remove
     unhelpful_phrases = [
         "The image is", "This is an image of", "The alt text is",
-        "file with", "a jpg file", "a png file"
+        "file with", "a jpg file", "a png file", "graphic of", "picture of",
+        "photo of", "image of"
     ]
     for phrase in unhelpful_phrases:
         generated_text = generated_text.replace(phrase, "").strip()
-    return generated_text.strip(". ")
 
-# Generate alt text using BLIP
-def generate_alt_text(image_url):
+    # Remove duplicate words or phrases
+    words = generated_text.split()
+    cleaned_words = []
+    for i, word in enumerate(words):
+        if i == 0 or word != words[i - 1]:  # Skip consecutive duplicates
+            cleaned_words.append(word)
+    cleaned_text = " ".join(cleaned_words)
+
+    # Ensure sentence case: Capitalize the first letter and end with a period
+    cleaned_text = cleaned_text.strip(". ").capitalize() + "."
+
+    return cleaned_text
+
+# Generate alt text using BLIP with alt_text and title_text integration
+def generate_alt_text(image_url, alt_text="", title_text=""):
     try:
         # Skip SVG files
         if image_url.lower().endswith(".svg"):
@@ -80,15 +97,22 @@ def generate_alt_text(image_url):
         response.raise_for_status()
         image = Image.open(response.raw).convert("RGB")
 
+        # Add alt_text and title_text to the input
+        context = ""
+        if alt_text.strip():
+            context += f" Provided alt text: {alt_text}. "
+        if title_text.strip():
+            context += f" Title text: {title_text}. "
+
         # Prepare inputs for the BLIP model
-        inputs = processor(image, return_tensors="pt")
+        inputs = processor(image, text=context, return_tensors="pt")  # Incorporate alt_text and title_text
 
         # Generate alt text
         outputs = model.generate(**inputs)
         generated_text = processor.decode(outputs[0], skip_special_tokens=True)
 
         # Post-process the generated alt text
-        return post_process_alt_text(generated_text)
+        return clean_and_post_process_alt_text(generated_text)
 
     except Exception as e:
         logging.error(f"Error generating alt text for {image_url}: {e}")
