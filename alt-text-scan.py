@@ -453,7 +453,8 @@ def analyze_alt_text(images_df, domain_or_file, readability_threshold=20):
 
     suggestions = []
 
-    # Suspicious and meaningless alt text
+    # Define suspicious and meaningless alt text values
+    wcag_failure_values = ["Null", "TBD", "None", "Alt Text", ""]
     suspicious_words = ['image of', 'graphic of', 'picture of', 'photo of', 'placeholder', 'spacer', 'tbd', 'todo', 'to do']
     meaningless_alt = ['alt', 'chart', 'decorative', 'image', 'graphic', 'photo', 'placeholder image', 'spacer', 'tbd', 'todo', 'to do', 'undefined']
 
@@ -464,26 +465,29 @@ def analyze_alt_text(images_df, domain_or_file, readability_threshold=20):
         size_kb = row.get('Size (KB)', 0)
         suggestion = []
 
+        # Check for WCAG 1.1.1 failures
+        if alt_text in wcag_failure_values or alt_text.strip().lower() == 'null':
+            suggestion.append("WCAG 1.1.1 Failure: Alt text is empty or invalid.")
+
         # Large image size
         if isinstance(size_kb, (int, float)) and size_kb > 250:
-            suggestion.append("Consider reducing the size of the image for a better user experience. ")
+            suggestion.append("Consider reducing the size of the image for a better user experience.")
 
-        # Check for empty or decorative alt text
+        # Check for suspicious or meaningless alt text
         if pd.isna(alt_text) or not alt_text.strip():
             suggestion.append("No alt text was provided. Clear WCAG failure.")
         else:
-            # Suspicious or meaningless words
             if any(word in alt_text.lower() for word in suspicious_words):
-                suggestion.append("Avoid phrases like 'image of', 'graphic of', or 'todo' in alt text. ")
+                suggestion.append("Avoid phrases like 'image of', 'graphic of', or 'todo' in alt text.")
             if alt_text.lower() in meaningless_alt:
-                suggestion.append("Alt text appears to be meaningless. Replace it with descriptive content. ")
+                suggestion.append("Alt text appears to be meaningless. Replace it with descriptive content.")
 
             # Text analysis
             words, sentences = text_analysis(alt_text)
             if len(alt_text) < 25:
-                suggestion.append("Alt text seems too short. Consider providing more context. ")
+                suggestion.append("Alt text seems too short. Consider providing more context.")
             if len(alt_text) > 250:
-                suggestion.append("Alt text may be too long. Consider shortening. ")
+                suggestion.append("Alt text may be too long. Consider shortening.")
             if words / max(sentences, 1) > readability_threshold:
                 suggestion.append("Consider simplifying the text.")
 
@@ -540,7 +544,9 @@ def main(sample_size=100, throttle=0, crawl_only=False):
         print("No URLs found. Exiting.")
         exit(1)
 
-    print(f"Processing {len(urls)} URLs...")
+    # Limit URLs to the sample size
+    sampled_urls = random.sample(urls, min(sample_size, len(urls)))
+    print(f"Processing {len(sampled_urls)} sampled URLs from {len(urls)} total found URLs.")
 
     # Crawl and parse each page to extract images
     images_data = defaultdict(lambda: {
@@ -550,7 +556,7 @@ def main(sample_size=100, throttle=0, crawl_only=False):
         "source_urls": [],
         "size_kb": 0
     })
-    for url in tqdm(urls, desc="Crawling URLs for images", unit="url"):
+    for url in tqdm(sampled_urls, desc="Crawling URLs for images", unit="url"):
         try:
             response = requests.get(url, timeout=10)
             if response.status_code == 200 and 'text/html' in response.headers.get('Content-Type', '').lower():
