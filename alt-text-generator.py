@@ -51,7 +51,20 @@ def extract_text_with_ocr(image_url):
         # Fetch the image
         response = requests.get(image_url, stream=True)
         response.raise_for_status()
+
+        # Validate content type to ensure it's an image
+        content_type = response.headers.get("Content-Type", "")
+        if not content_type.startswith("image/"):
+            logging.error(f"URL does not point to a valid image: {image_url} (Content-Type: {content_type})")
+            return "Invalid image URL or unsupported type"
+
+        # Load the image using Pillow
         image = Image.open(BytesIO(response.content))
+
+        # Validate image format
+        if image.format not in ["JPEG", "PNG", "BMP", "TIFF"]:
+            logging.error(f"Unsupported image format: {image.format} for URL: {image_url}")
+            return f"Unsupported image format: {image.format}"
 
         # Use Tesseract to extract text
         ocr_text = pytesseract.image_to_string(image)
@@ -63,9 +76,16 @@ def extract_text_with_ocr(image_url):
             return ocr_text.strip()
         else:
             return ""
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Network error while fetching image: {e}")
+        return "Network error while fetching image"
+    except OSError as e:
+        logging.error(f"Error loading image with Pillow: {e}")
+        return "Error loading image"
     except Exception as e:
-        logging.error(f"Error processing image with OCR: {e}")
-        return ""
+        logging.error(f"Unexpected error processing image with OCR: {e}")
+        return "Unexpected error processing image"
 
 # Initialize the BLIP model and processor
 logging.info("Initializing the BLIP model...")
