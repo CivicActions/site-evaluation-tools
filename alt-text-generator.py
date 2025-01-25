@@ -1,3 +1,8 @@
+import os  # Add this import at the top of the script
+
+# Disable parallelism for Hugging Face tokenizers to avoid fork-related warnings
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 import argparse
 import csv
 import logging
@@ -5,6 +10,11 @@ import requests
 from PIL import Image
 from transformers import BlipProcessor, BlipForConditionalGeneration
 import re
+import pytesseract
+from io import BytesIO
+from tqdm import tqdm  # Import tqdm for progress bar
+from datetime import datetime  # Import datetime at the top of the script
+
 
 # Define problematic suggestions that require alt text generation
 PROBLEMATIC_SUGGESTIONS = [
@@ -17,7 +27,29 @@ PROBLEMATIC_SUGGESTIONS = [
 ]
 
 # Set up logging for debugging
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+# logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+
+
+def extract_text_with_ocr(image_url):
+    try:
+        # Fetch the image
+        response = requests.get(image_url, stream=True)
+        response.raise_for_status()
+        image = Image.open(BytesIO(response.content))
+
+        # Use Tesseract to extract text
+        ocr_text = pytesseract.image_to_string(image)
+
+        # Count the number of words or lines to determine if the image is text-heavy
+        word_count = len(ocr_text.split())
+        if word_count > 20:  # Arbitrary threshold for text-heavy images
+            logging.info(f"Text-heavy image detected: {image_url}")
+            return ocr_text.strip()
+        else:
+            return ""
+    except Exception as e:
+        logging.error(f"Error processing image with OCR: {e}")
+        return ""
 
 # Initialize the BLIP model and processor
 logging.info("Initializing the BLIP model...")
@@ -37,24 +69,39 @@ def load_csv(file_path):
         logging.error(f"Failed to load CSV file: {e}")
         raise
 
-# Add image preview
-def add_image_preview(data):
-    for row in data:
-        image_url = row.get("Image_url", "")
-        row["Image Preview"] = f'=IMAGE("{image_url}")' if image_url else "No Image URL"
-
 # Define a function to save the CSV file
 def save_csv(file_path, data, fieldnames):
     try:
-        logging.info(f"Saving updated CSV file to: {file_path}")
-        with open(file_path, mode="w", encoding="utf-8", newline="") as file:
+        # Extract the base name and directory from the file path
+        base_name, ext = os.path.splitext(file_path)
+        
+        # Append the current date and time in the format YYYYMMDD_HHMM
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        updated_file_path = f"{base_name}_{timestamp}{ext}"
+        
+        logging.info(f"Saving updated CSV file to: {updated_file_path}")
+        
+        # Save the file with the updated name
+        with open(updated_file_path, mode="w", encoding="utf-8", newline="") as file:
             writer = csv.DictWriter(file, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(data)
+        
         logging.info("CSV file saved successfully.")
+        print(f"✅ CSV file has been successfully saved to: {updated_file_path}")  # Add this print statement
     except Exception as e:
         logging.error(f"Failed to save CSV file: {e}")
         raise
+
+def clean_ocr_text(ocr_text):
+    # Split into lines and remove duplicates or meaningless text
+    lines = ocr_text.split("\n")
+    cleaned_lines = []
+    for line in lines:
+        line = line.strip()
+        if line and line not in cleaned_lines:
+            cleaned_lines.append(line)
+    return " ".join(cleaned_lines)
 
 def clean_and_post_process_alt_text(generated_text):
     """
@@ -90,7 +137,13 @@ def generate_alt_text(image_url, alt_text="", title_text=""):
         if image_url.lower().endswith(".svg"):
             logging.info(f"Skipping SVG file: {image_url}")
             return ""
-        
+
+        # Check if the image is text-heavy using OCR
+        ocr_text = extract_text_with_ocr(image_url)
+        if ocr_text:
+            logging.info(f"OCR used for text-heavy image: {image_url}")
+            return clean_ocr_text(ocr_text)
+
         # Fetch the image from the URL
         logging.debug(f"Fetching image from URL: {image_url}")
         response = requests.get(image_url, stream=True)
@@ -105,9 +158,10 @@ def generate_alt_text(image_url, alt_text="", title_text=""):
             context += f" Title text: {title_text}. "
 
         # Prepare inputs for the BLIP model
-        inputs = processor(image, text=context, return_tensors="pt")  # Incorporate alt_text and title_text
+        inputs = processor(image, text=context, return_tensors="pt")
 
-        # Generate alt text
+        # Generate alt text using BLIP
+        logging.info(f"BLIP model used for image: {image_url}")
         outputs = model.generate(**inputs)
         generated_text = processor.decode(outputs[0], skip_special_tokens=True)
 
@@ -132,8 +186,7 @@ if __name__ == "__main__":
 
 # Process data and generate alt text
 logging.info("Processing rows in the CSV file...")
-for idx, row in enumerate(data):
-    logging.info(f"Processing row {idx + 1} of {len(data)}...")
+for idx, row in enumerate(tqdm(data, desc="Processing images", unit="image")):
     image_url = row.get("Image_url", "")
     if not image_url:
         logging.warning(f"Row {idx + 1} is missing an Image URL. Skipping.")
