@@ -72,7 +72,7 @@ def generate_alt_text(image_url):
         # Skip SVG files
         if image_url.lower().endswith(".svg"):
             logging.info(f"Skipping SVG file: {image_url}")
-            return "Skipped: SVG files are not processed"
+            return ""
         
         # Fetch the image from the URL
         logging.debug(f"Fetching image from URL: {image_url}")
