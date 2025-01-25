@@ -4,6 +4,7 @@ import logging
 import requests
 from PIL import Image
 from transformers import BlipProcessor, BlipForConditionalGeneration
+import re
 
 # Define problematic suggestions that require alt text generation
 PROBLEMATIC_SUGGESTIONS = [
@@ -16,7 +17,7 @@ PROBLEMATIC_SUGGESTIONS = [
 ]
 
 # Set up logging for debugging
-# logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # Initialize the BLIP model and processor
 logging.info("Initializing the BLIP model...")
@@ -68,8 +69,13 @@ def post_process_alt_text(generated_text):
 # Generate alt text using BLIP
 def generate_alt_text(image_url):
     try:
+        # Skip SVG files
+        if image_url.lower().endswith(".svg"):
+            logging.info(f"Skipping SVG file: {image_url}")
+            return "Skipped: SVG files are not processed"
+        
         # Fetch the image from the URL
-        # logging.debug(f"Fetching image from URL: {image_url}")
+        logging.debug(f"Fetching image from URL: {image_url}")
         response = requests.get(image_url, stream=True)
         response.raise_for_status()
         image = Image.open(response.raw).convert("RGB")
@@ -87,6 +93,7 @@ def generate_alt_text(image_url):
     except Exception as e:
         logging.error(f"Error generating alt text for {image_url}: {e}")
         return f"Error generating alt text: {e}"
+    
 
 # Main function
 if __name__ == "__main__":
