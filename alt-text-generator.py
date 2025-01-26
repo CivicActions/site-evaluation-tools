@@ -14,6 +14,7 @@ import pytesseract
 from io import BytesIO
 from tqdm import tqdm  # Import tqdm for progress bar
 from datetime import datetime  # Import datetime at the top of the script
+import sys
 
 
 # Define problematic suggestions that require alt text generation
@@ -95,6 +96,9 @@ model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-capt
 # Define a function to load the CSV file
 def load_csv(file_path):
     try:
+        # Increase the CSV field size limit
+        csv.field_size_limit(sys.maxsize)
+        
         logging.info(f"Loading CSV file from: {file_path}")
         with open(file_path, mode="r", encoding="utf-8") as file:
             reader = csv.DictReader(file)
