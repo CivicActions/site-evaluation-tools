@@ -16,6 +16,8 @@ from tqdm import tqdm  # Import tqdm for progress bar
 from datetime import datetime  # Import datetime at the top of the script
 import sys
 import anthropic
+import base64  # Import for Base64 encoding
+
 
 # Add Anthropic and Ollama API base URLs and keys
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
@@ -59,6 +61,8 @@ def generate_with_anthropic(prompt):
             "\n\nAssistant: I'll provide just the alt text with no additional text:\n"
         )
         
+        print(f"INFO: Sending the following prompt to the LLM (Claude):\n{formatted_prompt}\n")
+
         try:
             response = client.messages.create(
                 model="claude-3-opus-20240229",
@@ -108,79 +112,75 @@ def generate_with_anthropic(prompt):
         return f"Error generating text with Anthropic API: {str(e)}"
 
 
-def generate_with_ollama(prompt, model_name="llama3.1:latest"):
+def generate_with_ollama(image_path_or_url, prompt, model_name="llama3.3:latest"):
     """Generate text using a hosted Ollama model with improved response handling."""
     try:
-        # Create a more specific prompt that explicitly requests just the alt text
+        # Debugging: Check if the image is a local file or URL
+        if image_path_or_url.startswith("http"):
+            # If it's a URL, fetch the image
+            response = requests.get(image_path_or_url, stream=True)
+            response.raise_for_status()
+            content_type = response.headers.get("Content-Type", "")
+            if not content_type.startswith("image/"):
+                raise ValueError(f"Invalid content type: {content_type}")
+            image_data = response.content
+            print("INFO: Image fetched successfully from URL.")
+        else:
+            # If it's a local file, read the image
+            with open(image_path_or_url, "rb") as image_file:
+                image_data = image_file.read()
+            print("INFO: Image read successfully from file.")
+
+        # Encode the image to Base64
+        base64_image = base64.b64encode(image_data).decode("utf-8")
+        if not base64_image:
+            raise ValueError("Base64 encoding failed. The image might be invalid.")
+        print("INFO: Image successfully encoded to Base64.")
+
+        # Create a specific prompt for alt text generation
         formatted_prompt = (
             "Generate alt text for an image. Respond ONLY with the text that should go inside "
             "the alt attribute of an img tag. Do not include 'Alt text:', explanations, quotes, "
             "or any other text. Keep the description concise and factual.\n\n"
             f"Image details: {prompt}"
         )
-        
         payload = {
             "model": model_name,
             "prompt": formatted_prompt,
-            "stream": False,
-            "system": "You are a helpful assistant that generates alt text for images. Respond only with the alt text itself, without any explanations, disclaimers, or meta-commentary."
+            "images": [base64_image],
         }
-        
+
+        # Debugging: Print the payload being sent
+        # print("DEBUG: Payload being sent to Ollama API:")
+        # print(payload)
+
+        # Send the request to Ollama API
         response = requests.post(OLLAMA_API_URL, json=payload, timeout=30)
         response.raise_for_status()
-        
-        try:
-            response_data = response.json()
-            generated_text = ""
-            
-            if "response" in response_data:
-                generated_text = response_data["response"].strip()
-            elif "text" in response_data:
-                generated_text = response_data["text"].strip()
-            else:
-                return "Error: Unexpected response structure from Ollama"
-            
-            # Clean up the response
-            # Remove common prefixes
-            prefixes_to_remove = [
-                "Alt text:",
-                "Here is",
-                "The alt text is",
-                "I suggest",
-                "Based on the image,",
-                "A concise alt text would be",
-                "Here's a descriptive alt text:",
-                "The appropriate alt text is",
-            ]
-            
-            for prefix in prefixes_to_remove:
-                if generated_text.lower().startswith(prefix.lower()):
-                    generated_text = generated_text[len(prefix):].strip()
-            
-            # Remove quotes and leading/trailing punctuation
-            generated_text = generated_text.strip('"\'".,: ')
-            
-            # Remove any explanatory text after the main description
-            if "\n" in generated_text:
-                generated_text = generated_text.split("\n")[0].strip()
-            
-            # Ensure proper sentence format
-            generated_text = generated_text.strip(".")
-            if generated_text:
-                generated_text = generated_text[0].upper() + generated_text[1:] + "."
-            
-            return generated_text
-            
-        except ValueError as val_err:
-            logging.error(f"JSON decode error with Ollama API: {val_err}")
-            return "Error: Malformed JSON from Ollama API"
-            
+
+        # Parse and validate the response
+        response_data = response.json()
+        print("DEBUG: Raw response from Ollama API:", response_data)
+
+        if "response" in response_data:
+            generated_text = response_data["response"].strip()
+        elif "text" in response_data:
+            generated_text = response_data["text"].strip()
+        else:
+            return "Error: Unexpected response structure from Ollama API."
+
+        # Post-process the generated text
+        generated_text = generated_text.strip('"\'").,: ')
+        if generated_text:
+            generated_text = generated_text[0].upper() + generated_text[1:] + "."
+        return generated_text
+
     except requests.exceptions.HTTPError as http_err:
-        logging.error(f"Ollama API HTTP error: {http_err}")
-        return f"Error using Ollama API: {http_err}"
+        print(f"HTTP Error: {http_err}")
+        return f"Error: Failed to connect to Ollama API: {http_err}"
     except Exception as e:
-        logging.error(f"Error using Ollama API: {e}")
-        return f"Error generating text with Ollama API: {str(e)}"
+        print(f"Error: {e}")
+        return f"Error generating alt text: {str(e)}"
 
 
 def check_image_exists(image_url):
@@ -348,6 +348,7 @@ def generate_alt_text(image_url, alt_text="", title_text="", model="blip"):
             response.raise_for_status()
             image = Image.open(response.raw).convert("RGB")
             context = f" Provided alt text: {alt_text}. Title text: {title_text}."
+            print(f"INFO: Sending the following prompt to the LLM (BLIP):\n{context}\n")
             inputs = processor(image, text=context, return_tensors="pt")
             outputs = model.generate(**inputs)
             generated_text = processor.decode(outputs[0], skip_special_tokens=True)
@@ -367,7 +368,8 @@ def generate_alt_text(image_url, alt_text="", title_text="", model="blip"):
                 # f"Provided alt text: '{alt_text}'. Title text: '{title_text}'. "
                 # "Focus on accessibility and provide an appropriate description."
             )
-            return generate_with_ollama(prompt)
+            # return generate_with_ollama(prompt)
+            return generate_with_ollama(image_url, prompt)
         else:
             return f"Unsupported model: {model}"
 
