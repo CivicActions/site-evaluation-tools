@@ -108,49 +108,54 @@ def generate_with_anthropic(prompt):
 
 
 def generate_with_ollama(prompt, model_name="llama3.1:latest"):
-    """Generate text using a hosted Ollama model with proper stream handling."""
+    """Generate concise alt text using a hosted Ollama model."""
     try:
-        payload = {
-            "model": model_name,
-            "prompt": prompt,
-            "stream": False  # Set to False to get a complete response
-        }
-        
+        # Refine the prompt for clarity and specificity
+        refined_prompt = (
+            f"Generate alt text for the provided image. Respond ONLY with the text that should go inside the alt "
+            f"attribute of an img tag. Do not include explanations, context, or prefaces. Just provide the alt text.\n\n"
+            f"Image description: {prompt}"
+        )
+
+        # Send the refined prompt to the Ollama API
+        payload = {"model": model_name, "prompt": refined_prompt}
         response = requests.post(OLLAMA_API_URL, json=payload, timeout=30)
-        response.raise_for_status()
-        
-        # For debugging
+
+        # Log the full response text for debugging
         logging.debug(f"Ollama API raw response: {response.text}")
-        
-        try:
-            response_data = response.json()
-            if "response" in response_data:  # Ollama usually returns response in this field
-                return response_data["response"].strip()
-            elif "text" in response_data:    # Fallback for older versions
-                return response_data["text"].strip()
-            else:
-                logging.error(f"Unexpected Ollama API response structure: {response_data}")
-                return "Error: Unexpected response structure from Ollama"
-                
-        except ValueError as val_err:
-            logging.error(f"JSON decode error with Ollama API: {val_err}")
-            # Try to handle streaming response
-            lines = response.text.strip().split('\n')
-            if lines:
-                try:
-                    # Take the last complete JSON object
-                    last_response = json.loads(lines[-1])
-                    return last_response.get("response", "").strip()
-                except:
-                    return "Error: Could not parse Ollama response"
-            return "Error: Malformed JSON from Ollama API"
-            
+
+        # Check for HTTP errors
+        response.raise_for_status()
+
+        # Parse the JSON response
+        response_data = response.json()
+
+        # Post-process the response to extract only the alt text
+        alt_text = response_data.get("response", "").strip()
+
+        # Remove any unwanted prefixes or extraneous text
+        prefixes_to_remove = [
+            "Based on the image, I will generate an alt text that is concise, yet descriptive.",
+            "Here is a concise and descriptive alt text for the image:",
+            "Alt Text:",
+            "Unfortunately, I cannot verify the image, but here is a suggestion:",
+        ]
+        for prefix in prefixes_to_remove:
+            if alt_text.startswith(prefix):
+                alt_text = alt_text[len(prefix):].strip()
+
+        # Ensure the text is concise and clean
+        return alt_text.strip()
+
     except requests.exceptions.HTTPError as http_err:
         logging.error(f"Ollama API HTTP error: {http_err} - Response: {http_err.response.text}")
         return f"Error using Ollama API: {http_err.response.text}"
+    except ValueError as val_err:
+        logging.error(f"JSON decode error with Ollama API: {val_err}")
+        return "Error: Malformed JSON from Ollama API"
     except Exception as e:
         logging.error(f"Error using Ollama API: {e}")
-        return f"Error generating text with Ollama API: {str(e)}"
+        return f"Error generating text with Ollama API: {e}"
 
 
 def check_image_exists(image_url):
