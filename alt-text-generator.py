@@ -15,6 +15,14 @@ from io import BytesIO
 from tqdm import tqdm  # Import tqdm for progress bar
 from datetime import datetime  # Import datetime at the top of the script
 import sys
+import anthropic
+
+
+# Add Anthropic and Ollama API base URLs and keys
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+if not ANTHROPIC_API_KEY:
+    raise ValueError("Anthropic API Key is not set. Please set the ANTHROPIC_API_KEY environment variable.")
+OLLAMA_API_URL = "http://localhost:11434/api/generate"  # Assuming Ollama runs locally
 
 
 # Define problematic suggestions that require alt text generation
@@ -30,6 +38,80 @@ PROBLEMATIC_SUGGESTIONS = [
 # Set up logging for debugging
 # logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 
+def generate_with_anthropic(prompt):
+    """Generate text using Anthropic's Claude API."""
+    try:
+        # Initialize the Anthropic client
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        if not client.api_key:
+            raise ValueError("Anthropic API Key is not set. Please set the ANTHROPIC_API_KEY environment variable.")
+        
+        # Format the message with very specific instructions
+        formatted_prompt = (
+            "\n\nHuman: Generate alt text for an image. Respond ONLY with the text that should go inside "
+            "the alt attribute of an img tag. Do not include 'Alt text:', explanations, quotes, or any other text. "
+            f"Image details: {prompt}"
+            "\n\nAssistant: I'll provide just the alt text with no additional text:\n"
+        )
+        
+        try:
+            response = client.messages.create(
+                model="claude-3-opus-20240229",
+                max_tokens=300,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": formatted_prompt
+                    }
+                ]
+            )
+            
+            # Extract and clean the response text
+            generated_text = response.content[0].text.strip()
+            
+            # Remove common prefixes and suffixes
+            prefixes_to_remove = [
+                "Alt text:", 
+                "Here is a concise and descriptive alt text for the image:",
+                "Here is a concise and descriptive alt text for the provided image:",
+                "I'll provide just the alt text with no additional text:",
+            ]
+            
+            for prefix in prefixes_to_remove:
+                if generated_text.startswith(prefix):
+                    generated_text = generated_text[len(prefix):].strip()
+            
+            # Remove any quotes
+            generated_text = generated_text.strip('"\'')
+            
+            # Remove any explanatory text after the main description
+            if "\n" in generated_text:
+                generated_text = generated_text.split("\n")[0].strip()
+            
+            return generated_text
+
+        except anthropic.APIError as api_error:
+            logging.error(f"Anthropic API Error: {str(api_error)}")
+            return f"Error with Anthropic API: {str(api_error)}"
+            
+        except anthropic.APIConnectionError as conn_error:
+            logging.error(f"Connection Error: {str(conn_error)}")
+            return "Error connecting to Anthropic API"
+
+    except Exception as e:
+        logging.error(f"Error using Anthropic API: {e}")
+        return f"Error generating text with Anthropic API: {str(e)}"
+
+def generate_with_ollama(prompt):
+    """Generate text using a hosted Ollama model."""
+    try:
+        payload = {"model": "your-model-name", "prompt": prompt}
+        response = requests.post(OLLAMA_API_URL, json=payload, timeout=30)
+        response.raise_for_status()
+        return response.json().get("text", "Error: No response from Ollama")
+    except Exception as e:
+        logging.error(f"Error using Ollama API: {e}")
+        return "Error generating text with Ollama API"
 
 def check_image_exists(image_url):
     """
@@ -171,7 +253,8 @@ def clean_and_post_process_alt_text(generated_text):
     return cleaned_text
 
 # Generate alt text using BLIP with alt_text and title_text integration
-def generate_alt_text(image_url, alt_text="", title_text=""):
+def generate_alt_text(image_url, alt_text="", title_text="", model="blip"):
+    """Generate alt text using BLIP, Anthropic, or Ollama."""
     try:
         # Skip SVG files
         if image_url.lower().endswith(".svg"):
@@ -189,29 +272,34 @@ def generate_alt_text(image_url, alt_text="", title_text=""):
             logging.info(f"OCR used for text-heavy image: {image_url}")
             return clean_ocr_text(ocr_text)
 
-        # Fetch the image from the URL
-        logging.debug(f"Fetching image from URL: {image_url}")
-        response = requests.get(image_url, stream=True)
-        response.raise_for_status()
-        image = Image.open(response.raw).convert("RGB")
-
-        # Add alt_text and title_text to the input
-        context = ""
-        if alt_text.strip():
-            context += f" Provided alt text: {alt_text}. "
-        if title_text.strip():
-            context += f" Title text: {title_text}. "
-
-        # Prepare inputs for the BLIP model
-        inputs = processor(image, text=context, return_tensors="pt")
-
-        # Generate alt text using BLIP
-        logging.info(f"BLIP model used for image: {image_url}")
-        outputs = model.generate(**inputs)
-        generated_text = processor.decode(outputs[0], skip_special_tokens=True)
-
-        # Post-process the generated alt text
-        return clean_and_post_process_alt_text(generated_text)
+        if model == "blip":
+            # Use BLIP
+            response = requests.get(image_url, stream=True)
+            response.raise_for_status()
+            image = Image.open(response.raw).convert("RGB")
+            context = f" Provided alt text: {alt_text}. Title text: {title_text}."
+            inputs = processor(image, text=context, return_tensors="pt")
+            outputs = model.generate(**inputs)
+            generated_text = processor.decode(outputs[0], skip_special_tokens=True)
+            return clean_and_post_process_alt_text(generated_text)
+        elif model == "anthropic":
+            # Use Anthropic
+            prompt = (
+                f"Generate concise and descriptive alt text for the following image URL: {image_url}. "
+                # f"Provided alt text: '{alt_text}'. Title text: '{title_text}'. "
+                "Focus on accessibility and provide an appropriate description."
+            )
+            return generate_with_anthropic(prompt)
+        elif model == "ollama":
+            # Use Ollama
+            prompt = (
+                f"Generate concise and descriptive alt text for the following image URL: {image_url}. "
+                f"Provided alt text: '{alt_text}'. Title text: '{title_text}'. "
+                "Focus on accessibility and provide an appropriate description."
+            )
+            return generate_with_ollama(prompt)
+        else:
+            return f"Unsupported model: {model}"
 
     except Exception as e:
         logging.error(f"Error generating alt text for {image_url}: {e}")
@@ -222,33 +310,35 @@ def generate_alt_text(image_url, alt_text="", title_text=""):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate alt text for images based on a CSV file.")
     parser.add_argument("-c", "--csv", required=True, help="Path to the input CSV file.")
+    parser.add_argument("-m", "--model", default="blip", choices=["blip", "anthropic", "ollama"], help="Model to use for text generation.")
     args = parser.parse_args()
 
     input_csv = args.csv
+    selected_model = args.model
 
     # Load CSV data
     data = load_csv(input_csv)
 
-# Process data and generate alt text
-logging.info("Processing rows in the CSV file...")
-for idx, row in enumerate(tqdm(data, desc="Processing images", unit="image")):
-    image_url = row.get("Image_url", "")
-    if not image_url:
-        logging.warning(f"Row {idx + 1} is missing an Image URL. Skipping.")
-        row["Generated Alt Text"] = "Error: Missing image URL"
-        continue
+    # Process data and generate alt text
+    logging.info("Processing rows in the CSV file...")
+    for idx, row in enumerate(tqdm(data, desc="Processing images", unit="image")):
+        image_url = row.get("Image_url", "")
+        if not image_url:
+            logging.warning(f"Row {idx + 1} is missing an Image URL. Skipping.")
+            row["Generated Alt Text"] = "Error: Missing image URL"
+            continue
 
-    # Check if the suggestions indicate alt text needs improvement
-    suggestions = row.get("Suggestions", "")
-    if any(problematic in suggestions for problematic in PROBLEMATIC_SUGGESTIONS):
-        logging.info(f"Generating alt text for row {idx + 1} due to suggestion: {suggestions}")
-        row["Generated Alt Text"] = generate_alt_text(image_url)
-    else:
-        logging.info(f"Alt text for row {idx + 1} seems fine. Skipping generation.")
-        row["Generated Alt Text"] = "Skipped: Alt text sufficient"
+        # Check if the suggestions indicate alt text needs improvement
+        suggestions = row.get("Suggestions", "")
+        if any(problematic in suggestions for problematic in PROBLEMATIC_SUGGESTIONS):
+            logging.info(f"Generating alt text for row {idx + 1} due to suggestion: {suggestions}")
+            row["Generated Alt Text"] = generate_alt_text(image_url, model=selected_model)
+        else:
+            logging.info(f"Alt text for row {idx + 1} seems fine. Skipping generation.")
+            row["Generated Alt Text"] = "Skipped: Alt text sufficient"
 
-# Save updated CSV
-output_csv = input_csv.replace(".csv", "_with_alt_text.csv")
-fieldnames = data[0].keys() if data else []
-save_csv(output_csv, data, fieldnames)
-logging.info(f"Processed CSV saved to: {output_csv}")
+    # Save updated CSV
+    output_csv = input_csv.replace(".csv", "_with_alt_text.csv")
+    fieldnames = data[0].keys() if data else []
+    save_csv(output_csv, data, fieldnames)
+    logging.info(f"Processed CSV saved to: {output_csv}")
