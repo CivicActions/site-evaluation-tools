@@ -17,12 +17,15 @@ from datetime import datetime  # Import datetime at the top of the script
 import sys
 import anthropic
 
-
 # Add Anthropic and Ollama API base URLs and keys
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-if not ANTHROPIC_API_KEY:
-    raise ValueError("Anthropic API Key is not set. Please set the ANTHROPIC_API_KEY environment variable.")
 OLLAMA_API_URL = "http://localhost:11434/api/generate"  # Assuming Ollama runs locally
+DEFAULT_MODEL = "blip"
+
+def validate_anthropic_key(selected_model):
+    """Ensure the Anthropic API key is set only if the 'anthropic' model is selected."""
+    if selected_model == "anthropic" and not ANTHROPIC_API_KEY:
+        raise ValueError("Anthropic API Key is not set. Please set the ANTHROPIC_API_KEY environment variable.")
 
 
 # Define problematic suggestions that require alt text generation
@@ -47,6 +50,7 @@ def generate_with_anthropic(prompt):
             raise ValueError("Anthropic API Key is not set. Please set the ANTHROPIC_API_KEY environment variable.")
         
         # Format the message with very specific instructions
+        # formatted_prompt = f"\n\nHuman: {prompt}\n\nAssistant:"
         formatted_prompt = (
             "\n\nHuman: Generate alt text for an image. Respond ONLY with the text that should go inside "
             "the alt attribute of an img tag. Do not include 'Alt text:', explanations, quotes, or any other text. "
@@ -102,16 +106,52 @@ def generate_with_anthropic(prompt):
         logging.error(f"Error using Anthropic API: {e}")
         return f"Error generating text with Anthropic API: {str(e)}"
 
-def generate_with_ollama(prompt):
-    """Generate text using a hosted Ollama model."""
+
+def generate_with_ollama(prompt, model_name="llama3.1:latest"):
+    """Generate text using a hosted Ollama model with proper stream handling."""
     try:
-        payload = {"model": "your-model-name", "prompt": prompt}
+        payload = {
+            "model": model_name,
+            "prompt": prompt,
+            "stream": False  # Set to False to get a complete response
+        }
+        
         response = requests.post(OLLAMA_API_URL, json=payload, timeout=30)
         response.raise_for_status()
-        return response.json().get("text", "Error: No response from Ollama")
+        
+        # For debugging
+        logging.debug(f"Ollama API raw response: {response.text}")
+        
+        try:
+            response_data = response.json()
+            if "response" in response_data:  # Ollama usually returns response in this field
+                return response_data["response"].strip()
+            elif "text" in response_data:    # Fallback for older versions
+                return response_data["text"].strip()
+            else:
+                logging.error(f"Unexpected Ollama API response structure: {response_data}")
+                return "Error: Unexpected response structure from Ollama"
+                
+        except ValueError as val_err:
+            logging.error(f"JSON decode error with Ollama API: {val_err}")
+            # Try to handle streaming response
+            lines = response.text.strip().split('\n')
+            if lines:
+                try:
+                    # Take the last complete JSON object
+                    last_response = json.loads(lines[-1])
+                    return last_response.get("response", "").strip()
+                except:
+                    return "Error: Could not parse Ollama response"
+            return "Error: Malformed JSON from Ollama API"
+            
+    except requests.exceptions.HTTPError as http_err:
+        logging.error(f"Ollama API HTTP error: {http_err} - Response: {http_err.response.text}")
+        return f"Error using Ollama API: {http_err.response.text}"
     except Exception as e:
         logging.error(f"Error using Ollama API: {e}")
-        return "Error generating text with Ollama API"
+        return f"Error generating text with Ollama API: {str(e)}"
+
 
 def check_image_exists(image_url):
     """
@@ -294,8 +334,8 @@ def generate_alt_text(image_url, alt_text="", title_text="", model="blip"):
             # Use Ollama
             prompt = (
                 f"Generate concise and descriptive alt text for the following image URL: {image_url}. "
-                f"Provided alt text: '{alt_text}'. Title text: '{title_text}'. "
-                "Focus on accessibility and provide an appropriate description."
+                # f"Provided alt text: '{alt_text}'. Title text: '{title_text}'. "
+                # "Focus on accessibility and provide an appropriate description."
             )
             return generate_with_ollama(prompt)
         else:
@@ -308,13 +348,18 @@ def generate_alt_text(image_url, alt_text="", title_text="", model="blip"):
 
 # Main function
 if __name__ == "__main__":
+    # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Generate alt text for images based on a CSV file.")
     parser.add_argument("-c", "--csv", required=True, help="Path to the input CSV file.")
-    parser.add_argument("-m", "--model", default="blip", choices=["blip", "anthropic", "ollama"], help="Model to use for text generation.")
+    parser.add_argument("-m", "--model", default=DEFAULT_MODEL, choices=["blip", "anthropic", "ollama"], help="Model to use for text generation.")
     args = parser.parse_args()
 
+    # Assign input arguments to variables
     input_csv = args.csv
     selected_model = args.model
+
+    # Validate Anthropic API key only if 'anthropic' model is selected
+    validate_anthropic_key(selected_model)
 
     # Load CSV data
     data = load_csv(input_csv)
