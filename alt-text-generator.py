@@ -5,6 +5,8 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import argparse
 import csv
+import json
+import time
 import logging
 import requests
 from PIL import Image
@@ -41,9 +43,9 @@ PROBLEMATIC_SUGGESTIONS = [
     "Consider simplifying the text.",
     "Alt text is too short. Provide more context."
 ]
+# Enable logging with timestamps
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Set up logging for debugging
-# logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 
 def generate_with_anthropic(prompt):
     """Generate text using Anthropic's Claude API."""
@@ -122,34 +124,30 @@ def send_request_with_retry(payload, timeout=60):
     response.raise_for_status()
     return response
 
-def generate_with_ollama(image_path_or_url, prompt, model_name="llama3.3:latest"):
-    """
-    Generate alt text using a hosted Ollama model with improved response handling.
-    """
+
+def generate_with_ollama(image_path_or_url, prompt, model_name="llama3.2-vision:latest"):
+    """Generate text using a hosted Ollama model with enhanced streaming response handling."""
     try:
-        # Debugging: Check if the input is a URL or a local file
+        logging.info("Starting Ollama text generation...")
+        
+        # Determine if input is a URL or local file
         if image_path_or_url.startswith("http"):
-            # Fetch the image from the URL
-            response = requests.get(image_path_or_url, stream=True, timeout=30)
+            logging.debug("Fetching image from URL...")
+            response = requests.get(image_path_or_url, stream=True)
             response.raise_for_status()
-            content_type = response.headers.get("Content-Type", "")
-            if not content_type.startswith("image/"):
-                raise ValueError(f"Invalid content type for image: {content_type}")
             image_data = response.content
-            logging.info("Image fetched successfully from URL.")
+            logging.info("Image fetched successfully.")
         else:
-            # Read the image from a local file
+            logging.debug("Reading image from local file...")
             with open(image_path_or_url, "rb") as image_file:
                 image_data = image_file.read()
-            logging.info("Image read successfully from file.")
+            logging.info("Image read successfully.")
 
-        # Encode the image to Base64
+        # Encode image to Base64
         base64_image = base64.b64encode(image_data).decode("utf-8")
-        if not base64_image:
-            raise ValueError("Base64 encoding failed. The image might be invalid.")
         logging.info("Image successfully encoded to Base64.")
 
-        # Create a specific prompt for alt text generation
+        # Prepare payload
         formatted_prompt = (
             "Generate alt text for an image. Respond ONLY with the text that should go inside "
             "the alt attribute of an img tag. Do not include 'Alt text:', explanations, quotes, "
@@ -162,49 +160,45 @@ def generate_with_ollama(image_path_or_url, prompt, model_name="llama3.3:latest"
             "images": [base64_image],
         }
 
-        # Debugging: Print the payload being sent to the API
-        logging.debug(f"Payload being sent to Ollama API: {payload}")
+        # Send request to Ollama API
+        logging.info("Sending request to Ollama API...")
+        start_time = time.time()
+        response = requests.post(OLLAMA_API_URL, json=payload, timeout=90)
+        elapsed_time = time.time() - start_time
+        logging.info(f"Response received from Ollama API in {elapsed_time:.2f} seconds.")
 
-        # Send the request to Ollama API with retry logic
-        response = send_request_with_retry(payload, timeout=60)
-        response_data = response.json()
+        # Parse the response containing multiple JSON objects
+        raw_response = response.text
+        logging.debug(f"Raw response text from Ollama API: {raw_response}")
 
-        # Debugging: Print the raw response from the API
-        logging.debug(f"Raw response from Ollama API: {response_data}")
+        # Split and parse each JSON object
+        final_text = ""
+        for line in raw_response.splitlines():
+            try:
+                json_object = json.loads(line)
+                if "response" in json_object:
+                    final_text += json_object["response"]
+                if json_object.get("done", False):
+                    break  # Stop if "done" is true
+            except json.JSONDecodeError as e:
+                logging.error(f"JSON decoding failed for line: {line}. Error: {e}")
+                continue
 
-        # Extract the generated text from the response
-        if "response" in response_data:
-            generated_text = response_data["response"].strip()
-        elif "text" in response_data:
-            generated_text = response_data["text"].strip()
-        else:
-            return "Error: Unexpected response structure from Ollama API."
-
-        # Post-process the generated text
-        prefixes_to_remove = [
-            "Alt text:", "Here is", "The alt text is", "I suggest",
-            "Based on the image,", "A concise alt text would be",
-            "Here's a descriptive alt text:", "The appropriate alt text is"
-        ]
-        for prefix in prefixes_to_remove:
-            if generated_text.lower().startswith(prefix.lower()):
-                generated_text = generated_text[len(prefix):].strip()
-
-        # Clean up unnecessary punctuation and ensure proper capitalization
-        generated_text = generated_text.strip('"\'").,: ')
-        if generated_text:
-            generated_text = generated_text[0].upper() + generated_text[1:] + "."
-
-        return generated_text
+        # Clean and format the final text
+        final_text = final_text.strip('"\'").,: ')
+        if final_text:
+            final_text = final_text[0].upper() + final_text[1:] + "."
+        logging.info("Alt text generated successfully.")
+        return final_text
 
     except requests.exceptions.Timeout:
         logging.error("Request to Ollama API timed out.")
         return "Error: Request to Ollama API timed out."
-    except requests.exceptions.HTTPError as http_err:
-        logging.error(f"HTTP Error: {http_err}")
-        return f"Error: Failed to connect to Ollama API: {http_err}"
+    except requests.exceptions.RequestException as req_err:
+        logging.error(f"HTTP Error: {req_err}")
+        return f"Error: Failed to connect to Ollama API: {req_err}"
     except Exception as e:
-        logging.error(f"Error: {e}")
+        logging.error(f"Unexpected error: {e}")
         return f"Error generating alt text: {str(e)}"
 
 
