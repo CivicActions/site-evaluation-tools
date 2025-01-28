@@ -22,10 +22,15 @@ import base64  # Import for Base64 encoding
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 
-# Add Anthropic and Ollama API base URLs and keys
+# Add Anthropic and Ollama & Blip API base URLs
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+
 OLLAMA_API_URL = "http://localhost:11434/api/generate"  # Assuming Ollama runs locally
+
 DEFAULT_MODEL = "blip"
+processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
+
 
 def validate_anthropic_key(selected_model):
     """Ensure the Anthropic API key is set only if the 'anthropic' model is selected."""
@@ -45,6 +50,62 @@ PROBLEMATIC_SUGGESTIONS = [
 ]
 # Enable logging with timestamps
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+
+
+def generate_with_blip(image_path_or_url, alt_text="", title_text=""):
+    """
+    Generate alt text using the BLIP model with a base64-encoded image.
+    
+    Args:
+        image_path_or_url (str): Path to a local image file or URL of the image.
+        alt_text (str): Existing alt text, if any, to provide context to the LLM.
+        title_text (str): Existing title text, if any, to provide context to the LLM.
+
+    Returns:
+        str: Generated alt text.
+    """
+    try:
+        # Load the image
+        if image_path_or_url.startswith("http"):
+            # Fetch the image from URL
+            response = requests.get(image_path_or_url, stream=True)
+            response.raise_for_status()
+            image = Image.open(response.raw).convert("RGB")
+            logging.info(f"Image fetched successfully from URL: {image_path_or_url}")
+        else:
+            # Load the image from a local file
+            image = Image.open(image_path_or_url).convert("RGB")
+            logging.info(f"Image loaded successfully from local file: {image_path_or_url}")
+
+        # Encode the image to Base64 for logging/debugging purposes
+        buffered = BytesIO()
+        image.save(buffered, format="PNG")
+        base64_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        logging.debug(f"Base64-encoded image size: {len(base64_image)} characters")
+
+        # Prepare context for BLIP
+        # context = f"Provided alt text: {alt_text}. Title text: {title_text}."
+        context = ""
+
+        # Generate alt text using BLIP
+        inputs = processor(image, text=context, return_tensors="pt")
+        outputs = model.generate(**inputs)
+        generated_text = processor.decode(outputs[0], skip_special_tokens=True)
+
+        # Post-process the generated text
+        cleaned_text = clean_and_post_process_alt_text(generated_text)
+        logging.info(f"\n\nBLIP generated alt text successfully:\n\n{cleaned_text}\n\n")
+        return cleaned_text
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error fetching image from URL: {e}")
+        return "Error fetching image from URL"
+    except OSError as e:
+        logging.error(f"Error loading image file: {e}")
+        return "Error loading image file"
+    except Exception as e:
+        logging.error(f"Unexpected error in BLIP generation: {e}")
+        return "\nError generating alt text with BLIP"
 
 
 def generate_with_anthropic(prompt):
@@ -128,31 +189,38 @@ def send_request_with_retry(payload, timeout=60):
 def generate_with_ollama(image_path_or_url, prompt, model_name="llama3.2-vision:latest"):
     """Generate text using a hosted Ollama model with enhanced streaming response handling."""
     try:
-        logging.info("Starting Ollama text generation...")
+        logging.info(f"Starting Ollama text generation - Model: {model_name} ...")
         
         # Determine if input is a URL or local file
         if image_path_or_url.startswith("http"):
-            logging.debug("Fetching image from URL...")
+            logging.debug(f"Fetching image from URL: {image_path_or_url} ...")
             response = requests.get(image_path_or_url, stream=True)
             response.raise_for_status()
             image_data = response.content
             logging.info("Image fetched successfully.")
         else:
-            logging.debug("Reading image from local file...")
+            # logging.debug("Reading image from local file...")
             with open(image_path_or_url, "rb") as image_file:
                 image_data = image_file.read()
-            logging.info("Image read successfully.")
+            # logging.info("Image read successfully.")
 
         # Encode image to Base64
         base64_image = base64.b64encode(image_data).decode("utf-8")
-        logging.info("Image successfully encoded to Base64.")
+        # logging.info("Image successfully encoded to Base64.")
 
         # Prepare payload
+        # formatted_prompt = (
+        #    "Generate alt text for an image. Respond ONLY with the text that should go inside "
+        #    "the alt attribute of an img tag. Do not include 'Alt text:', explanations, quotes, "
+        #    "or any other text. Keep the description concise and factual. It should be no more "
+        #    "than 250 characters long, so please summarize. If there is text in the image, give "
+        #    "those priority. Large text should come first. \n\n"
+        #    f"Image details: {prompt}"
+        # )
         formatted_prompt = (
-            "Generate alt text for an image. Respond ONLY with the text that should go inside "
-            "the alt attribute of an img tag. Do not include 'Alt text:', explanations, quotes, "
-            "or any other text. Keep the description concise and factual.\n\n"
-            f"Image details: {prompt}"
+            "\n\nHuman: Generate alt text for an image. Respond ONLY with the text that should go inside "
+            "the alt attribute of an img tag. Keep it concise, factual, and limited to 350 characters. "
+            f"Image details: {prompt}\n\nAssistant:"
         )
         payload = {
             "model": model_name,
@@ -161,7 +229,7 @@ def generate_with_ollama(image_path_or_url, prompt, model_name="llama3.2-vision:
         }
 
         # Send request to Ollama API
-        logging.info("Sending request to Ollama API...")
+        # logging.info("Sending request to Ollama API...")
         start_time = time.time()
         response = requests.post(OLLAMA_API_URL, json=payload, timeout=90)
         elapsed_time = time.time() - start_time
@@ -169,7 +237,7 @@ def generate_with_ollama(image_path_or_url, prompt, model_name="llama3.2-vision:
 
         # Parse the response containing multiple JSON objects
         raw_response = response.text
-        logging.debug(f"Raw response text from Ollama API: {raw_response}")
+        # logging.debug(f"Raw Alternative Text from Ollama API: {raw_response}")
 
         # Split and parse each JSON object
         final_text = ""
@@ -188,7 +256,7 @@ def generate_with_ollama(image_path_or_url, prompt, model_name="llama3.2-vision:
         final_text = final_text.strip('"\'").,: ')
         if final_text:
             final_text = final_text[0].upper() + final_text[1:] + "."
-        logging.info("Alt text generated successfully.")
+        logging.info(f"\nAlt text generated successfully: \n\n {final_text} \n\n")
         return final_text
 
     except requests.exceptions.Timeout:
@@ -339,6 +407,11 @@ def clean_and_post_process_alt_text(generated_text):
     # Ensure sentence case: Capitalize the first letter and end with a period
     cleaned_text = cleaned_text.strip(". ").capitalize() + "."
 
+    # Truncate the text to 350 characters if necessary
+    if len(cleaned_text) > 360:
+        cleaned_text = cleaned_text[:357].rsplit(" ", 1)[0] + "..."  # Truncate and add ellipsis
+
+
     return cleaned_text
 
 # Generate alt text using BLIP with alt_text and title_text integration
@@ -361,34 +434,27 @@ def generate_alt_text(image_url, alt_text="", title_text="", model="blip"):
             logging.info(f"OCR used for text-heavy image: {image_url}")
             return clean_ocr_text(ocr_text)
 
+        # Generate alt text using the selected model
         if model == "blip":
             # Use BLIP
-            response = requests.get(image_url, stream=True)
-            response.raise_for_status()
-            image = Image.open(response.raw).convert("RGB")
-            context = f" Provided alt text: {alt_text}. Title text: {title_text}."
-            print(f"INFO: Sending the following prompt to the LLM (BLIP):\n{context}\n")
-            inputs = processor(image, text=context, return_tensors="pt")
-            outputs = model.generate(**inputs)
-            generated_text = processor.decode(outputs[0], skip_special_tokens=True)
-            return clean_and_post_process_alt_text(generated_text)
+            return generate_with_blip(image_url, alt_text, title_text)
+
         elif model == "anthropic":
             # Use Anthropic
             prompt = (
                 f"Generate concise and descriptive alt text for the following image URL: {image_url}. "
-                # f"Provided alt text: '{alt_text}'. Title text: '{title_text}'. "
                 "Focus on accessibility and provide an appropriate description."
             )
             return generate_with_anthropic(prompt)
+
         elif model == "ollama":
             # Use Ollama
             prompt = (
                 f"Generate concise and descriptive alt text for the following image URL: {image_url}. "
-                # f"Provided alt text: '{alt_text}'. Title text: '{title_text}'. "
-                # "Focus on accessibility and provide an appropriate description."
+                "Focus on accessibility and provide an appropriate description."
             )
-            # return generate_with_ollama(prompt)
             return generate_with_ollama(image_url, prompt)
+
         else:
             return f"Unsupported model: {model}"
 
@@ -419,6 +485,7 @@ if __name__ == "__main__":
     logging.info("Processing rows in the CSV file...")
     for idx, row in enumerate(tqdm(data, desc="Processing images", unit="image")):
         image_url = row.get("Image_url", "")
+
         if not image_url:
             logging.warning(f"Row {idx + 1} is missing an Image URL. Skipping.")
             row["Generated Alt Text"] = "Error: Missing image URL"
@@ -427,11 +494,11 @@ if __name__ == "__main__":
         # Check if the suggestions indicate alt text needs improvement
         suggestions = row.get("Suggestions", "")
         if any(problematic in suggestions for problematic in PROBLEMATIC_SUGGESTIONS):
-            logging.info(f"Generating alt text for row {idx + 1} due to suggestion: {suggestions}")
+            logging.info(f"\nGenerating alt text for row {idx + 1} due to suggestion: {suggestions}. \n\n\n")
             row["Generated Alt Text"] = generate_alt_text(image_url, model=selected_model)
         else:
-            logging.info(f"Alt text for row {idx + 1} seems fine. Skipping generation.")
-            row["Generated Alt Text"] = "Skipped: Alt text sufficient"
+            logging.info(f"Alt text for row {idx + 1} seems fine. Skipping generation for {image_url}.")
+            row["Generated Alt Text"] = "Skipped: Alt text sufficient \n\n\n"
 
     # Save updated CSV
     output_csv = input_csv.replace(".csv", "_with_alt_text.csv")
