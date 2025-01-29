@@ -20,9 +20,12 @@ import sys
 import anthropic
 import base64  # Import for Base64 encoding
 from tenacity import retry, stop_after_attempt, wait_fixed
+# from openai import AzureOpenAI 
+import openai
 
 
 # Add Anthropic and Ollama & Blip API base URLs
+# export ANTHROPIC_API_KEY="your_api_key_here"
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 OLLAMA_API_URL = "http://localhost:11434/api/generate"  # Assuming Ollama runs locally
@@ -31,6 +34,12 @@ DEFAULT_MODEL = "blip"
 processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
 model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
 
+#OpenAI API
+endpoint = os.getenv("ENDPOINT_URL", "https://civicactions-openai.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-08-01-preview")  
+deployment = os.getenv("DEPLOYMENT_NAME", "gpt-4o")  
+# subscription_key = os.getenv("AZURE_OPENAI_API_KEY", "REPLACE_WITH_YOUR_KEY_VALUE_HERE")  
+# export AZURE_OPENAI_API_KEY="your_api_key_here"
+subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
 
 def validate_anthropic_key(selected_model):
     """Ensure the Anthropic API key is set only if the 'anthropic' model is selected."""
@@ -270,6 +279,78 @@ def generate_with_ollama(image_path_or_url, prompt, model_name="llama3.2-vision:
         return f"Error generating alt text: {str(e)}"
 
 
+def generate_with_azure_openai(image_path_or_url, alt_text="", title_text=""):
+    """Generate alt text using Azure OpenAI with a base64-encoded image."""
+    try:
+        # Load the image and encode it to Base64
+        if image_path_or_url.startswith("http"):
+            response = requests.get(image_path_or_url, stream=True)
+            response.raise_for_status()
+            image_data = response.content
+            logging.info(f"Image fetched successfully from URL: {image_path_or_url}")
+        else:
+            with open(image_path_or_url, "rb") as image_file:
+                image_data = image_file.read()
+            logging.info(f"Image loaded successfully from local file: {image_path_or_url}")
+
+        # Convert image to Base64
+        base64_image = base64.b64encode(image_data).decode("ascii")
+
+        # Prepare chat prompt
+        chat_prompt = [
+            {
+                "role": "system",
+                "content": "Generate concise and descriptive alt text for an image. "
+                           "Keep it factual, limited to 350 characters, and prioritize any readable text in the image."
+            },
+            {
+                "role": "user",
+                "content": f"Existing alt text: {alt_text}. Title text: {title_text}.",
+            },
+            {
+                "role": "user",
+                "content": {"type": "image_url", "image_url": f"data:image/png;base64,{base64_image}"}
+            }
+        ]
+
+        # Initialize Azure OpenAI Service client
+        client = openai.AzureOpenAI(
+            api_key=subscription_key,
+            azure_endpoint=endpoint,
+            api_version="2024-05-01-preview",
+        )
+
+        # Generate response from Azure OpenAI
+        response = client.chat.completions.create(
+            model=deployment,
+            messages=chat_prompt,
+            max_tokens=350,
+            temperature=0.7,
+            top_p=0.95,
+            frequency_penalty=0,
+            presence_penalty=0,
+            stop=None,
+            stream=False
+        )
+
+        # Extract response text
+        generated_text = response.choices[0].message.content.strip()
+        cleaned_text = clean_and_post_process_alt_text(generated_text)
+
+        logging.info(f"\nAzure OpenAI generated alt text successfully:\n\n{cleaned_text}\n")
+        return cleaned_text
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error fetching image from URL: {e}")
+        return "Error fetching image from URL"
+    except OSError as e:
+        logging.error(f"Error loading image file: {e}")
+        return "Error loading image file"
+    except Exception as e:
+        logging.error(f"Unexpected error in Azure OpenAI generation: {e}")
+        return "Error generating alt text with Azure OpenAI"
+    
+
 def check_image_exists(image_url):
     """
     Check if the image URL exists by making a HEAD request to minimize bandwidth usage.
@@ -416,7 +497,7 @@ def clean_and_post_process_alt_text(generated_text):
 
 # Generate alt text using BLIP with alt_text and title_text integration
 def generate_alt_text(image_url, alt_text="", title_text="", model="blip"):
-    """Generate alt text using BLIP, Anthropic, or Ollama."""
+    """Generate alt text using BLIP, Anthropic, Ollama, or Azure OpenAI."""
     try:
         # Skip SVG files
         if image_url.lower().endswith(".svg"):
@@ -435,26 +516,22 @@ def generate_alt_text(image_url, alt_text="", title_text="", model="blip"):
             return clean_ocr_text(ocr_text)
 
         # Generate alt text using the selected model
-        if model == "blip":
-            # Use BLIP
+        if model == "blip": # Use BLIP
             return generate_with_blip(image_url, alt_text, title_text)
-
-        elif model == "anthropic":
-            # Use Anthropic
+        elif model == "anthropic": # Use Anthropic
             prompt = (
                 f"Generate concise and descriptive alt text for the following image URL: {image_url}. "
                 "Focus on accessibility and provide an appropriate description."
             )
             return generate_with_anthropic(prompt)
-
-        elif model == "ollama":
-            # Use Ollama
+        elif model == "ollama": # Use Ollama
             prompt = (
                 f"Generate concise and descriptive alt text for the following image URL: {image_url}. "
                 "Focus on accessibility and provide an appropriate description."
             )
             return generate_with_ollama(image_url, prompt)
-
+        elif model == "azure_openai": # Use Azure OpenAI
+            return generate_with_azure_openai(image_url, alt_text, title_text)
         else:
             return f"Unsupported model: {model}"
 
@@ -468,7 +545,7 @@ if __name__ == "__main__":
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Generate alt text for images based on a CSV file.")
     parser.add_argument("-c", "--csv", required=True, help="Path to the input CSV file.")
-    parser.add_argument("-m", "--model", default=DEFAULT_MODEL, choices=["blip", "anthropic", "ollama"], help="Model to use for text generation.")
+    parser.add_argument("-m", "--model", default=DEFAULT_MODEL, choices=["blip", "anthropic", "ollama", "azure_openai"], help="Model to use for text generation.")
     args = parser.parse_args()
 
     # Assign input arguments to variables
