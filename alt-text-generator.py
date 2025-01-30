@@ -12,6 +12,10 @@ import requests
 from PIL import Image
 from transformers import BlipProcessor, BlipForConditionalGeneration
 import re
+# import openai
+from openai import OpenAIError
+# Initialize the OpenAI client
+from openai import OpenAI
 import pytesseract
 from io import BytesIO
 from tqdm import tqdm  # Import tqdm for progress bar
@@ -20,8 +24,7 @@ import sys
 import anthropic
 import base64  # Import for Base64 encoding
 from tenacity import retry, stop_after_attempt, wait_fixed
-# from openai import AzureOpenAI 
-import openai
+
 
 
 # Add Anthropic and Ollama & Blip API base URLs
@@ -39,7 +42,19 @@ endpoint = os.getenv("ENDPOINT_URL", "https://civicactions-openai.openai.azure.c
 deployment = os.getenv("DEPLOYMENT_NAME", "gpt-4o")  
 # subscription_key = os.getenv("AZURE_OPENAI_API_KEY", "REPLACE_WITH_YOUR_KEY_VALUE_HERE")  
 # export AZURE_OPENAI_API_KEY="your_api_key_here"
+# Ensure API key is set
 subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
+if not subscription_key:
+    raise ValueError("AZURE_OPENAI_API_KEY environment variable is missing.")
+try:
+    client = OpenAI(api_key=subscription_key)
+    logging.info("✅ Azure OpenAI client initialized successfully.")
+except Exception as e:
+    logging.error(f"❌ Failed to initialize Azure OpenAI client: {e}")
+    client = None
+
+
+print(f"DEBUG: API Key = {subscription_key}")
 
 def validate_anthropic_key(selected_model):
     """Ensure the Anthropic API key is set only if the 'anthropic' model is selected."""
@@ -279,76 +294,65 @@ def generate_with_ollama(image_path_or_url, prompt, model_name="llama3.2-vision:
         return f"Error generating alt text: {str(e)}"
 
 
-def generate_with_azure_openai(image_path_or_url, alt_text="", title_text=""):
-    """Generate alt text using Azure OpenAI with a base64-encoded image."""
+# def generate_with_azure_openai(image_url, model, max_tokens, client):
+def generate_with_azure_openai(image_url, model, max_tokens, client):
+    if client is None:
+        logging.error("❌ Azure OpenAI client is missing. Skipping this image.")
+        return "Error: Azure OpenAI client missing"
     try:
-        # Load the image and encode it to Base64
-        if image_path_or_url.startswith("http"):
-            response = requests.get(image_path_or_url, stream=True)
-            response.raise_for_status()
-            image_data = response.content
-            logging.info(f"Image fetched successfully from URL: {image_path_or_url}")
-        else:
-            with open(image_path_or_url, "rb") as image_file:
-                image_data = image_file.read()
-            logging.info(f"Image loaded successfully from local file: {image_path_or_url}")
+        logging.info("\n======================")
+        logging.info(f"Generating alt text for image: {image_url}\n")
 
-        # Convert image to Base64
-        base64_image = base64.b64encode(image_data).decode("ascii")
+        # Fetch and encode the image in base64
+        response = requests.get(image_url, stream=True)
+        response.raise_for_status()
+        image_base64 = base64.b64encode(response.content).decode("utf-8")
 
-        # Prepare chat prompt
-        chat_prompt = [
-            {
-                "role": "system",
-                "content": "Generate concise and descriptive alt text for an image. "
-                           "Keep it factual, limited to 350 characters, and prioritize any readable text in the image."
-            },
-            {
-                "role": "user",
-                "content": f"Existing alt text: {alt_text}. Title text: {title_text}.",
-            },
-            {
-                "role": "user",
-                "content": {"type": "image_url", "image_url": f"data:image/png;base64,{base64_image}"}
-            }
+        # Determine MIME type
+        mime_type = "image/jpeg"
+        if image_url.lower().endswith(".png"):
+            mime_type = "image/png"
+        elif image_url.lower().endswith(".webp"):
+            mime_type = "image/webp"
+
+        # Format the base64 data correctly for OpenAI
+        image_data = f"data:{mime_type};base64,{image_base64}"
+
+        # Construct messages payload
+        messages = [
+            {"role": "system", "content": "Generate concise and descriptive alt text for an image."},
+            {"role": "user", "content": "Describe this image in detail."},
+            {"role": "user", "content": [{"type": "image_url", "image_url": image_data}]}
         ]
 
-        # Initialize Azure OpenAI Service client
-        client = openai.AzureOpenAI(
-            api_key=subscription_key,
-            azure_endpoint=endpoint,
-            api_version="2024-05-01-preview",
-        )
+        logging.info(f"Sending request to Azure OpenAI with {len(image_base64)}-character base64 image data.")
 
-        # Generate response from Azure OpenAI
+        # Call Azure OpenAI API
         response = client.chat.completions.create(
-            model=deployment,
-            messages=chat_prompt,
-            max_tokens=350,
-            temperature=0.7,
-            top_p=0.95,
-            frequency_penalty=0,
-            presence_penalty=0,
-            stop=None,
-            stream=False
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens
         )
 
-        # Extract response text
-        generated_text = response.choices[0].message.content.strip()
-        cleaned_text = clean_and_post_process_alt_text(generated_text)
+        # Extract and clean the response
+        if response and hasattr(response, 'choices') and response.choices:
+            alt_text = response.choices[0].message.content.strip()
+        else:
+            alt_text = "Error: No valid response from OpenAI"
+            logging.error("Received an unexpected response format from OpenAI.")
 
-        logging.info(f"\nAzure OpenAI generated alt text successfully:\n\n{cleaned_text}\n")
-        return cleaned_text
+        logging.info(f"Generated Alt Text: {alt_text}\n")
+        return alt_text
 
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error fetching image from URL: {e}")
-        return "Error fetching image from URL"
-    except OSError as e:
-        logging.error(f"Error loading image file: {e}")
-        return "Error loading image file"
+    except OpenAIError as e:
+        logging.error(f"OpenAI API error: {str(e)}")
+        return "Error: OpenAI API issue"
+    except requests.RequestException as e:
+        logging.error(f"Request error: {str(e)}")
+        return "Error: Unable to retrieve image"
     except Exception as e:
-        logging.error(f"Unexpected error in Azure OpenAI generation: {e}")
-        return "Error generating alt text with Azure OpenAI"
+        logging.error(f"Unexpected error: {str(e)}")
+        return "Error: Something went wrong"
     
 
 def check_image_exists(image_url):
@@ -492,14 +496,17 @@ def clean_and_post_process_alt_text(generated_text):
     if len(cleaned_text) > 360:
         cleaned_text = cleaned_text[:357].rsplit(" ", 1)[0] + "..."  # Truncate and add ellipsis
 
-
     return cleaned_text
 
 # Generate alt text using BLIP with alt_text and title_text integration
-def generate_alt_text(image_url, alt_text="", title_text="", model="blip"):
+def generate_alt_text(image_url, alt_text="", title_text="", model="blip", client=None):
     """Generate alt text using BLIP, Anthropic, Ollama, or Azure OpenAI."""
     try:
-        # Skip SVG files
+        # Ensure the client is provided for Azure OpenAI
+        if model == "azure_openai" and client is None:
+            raise ValueError("Azure OpenAI client is missing. Ensure it's properly initialized and passed.")
+
+        # Skip SVG files (not supported)
         if image_url.lower().endswith(".svg"):
             logging.info(f"Skipping SVG file: {image_url}")
             return "Skipped: SVG file"
@@ -509,29 +516,23 @@ def generate_alt_text(image_url, alt_text="", title_text="", model="blip"):
             logging.info(f"Image not found or inaccessible: {image_url}")
             return "404 Image Not Found"
 
-        # Check if the image is text-heavy using OCR
+        # Extract OCR text if the image is text-heavy
         ocr_text = extract_text_with_ocr(image_url)
         if ocr_text:
             logging.info(f"OCR used for text-heavy image: {image_url}")
             return clean_ocr_text(ocr_text)
 
         # Generate alt text using the selected model
-        if model == "blip": # Use BLIP
+        if model == "blip":
             return generate_with_blip(image_url, alt_text, title_text)
-        elif model == "anthropic": # Use Anthropic
-            prompt = (
-                f"Generate concise and descriptive alt text for the following image URL: {image_url}. "
-                "Focus on accessibility and provide an appropriate description."
-            )
+        elif model == "anthropic":
+            prompt = f"Generate concise and descriptive alt text for the following image URL: {image_url}."
             return generate_with_anthropic(prompt)
-        elif model == "ollama": # Use Ollama
-            prompt = (
-                f"Generate concise and descriptive alt text for the following image URL: {image_url}. "
-                "Focus on accessibility and provide an appropriate description."
-            )
+        elif model == "ollama":
+            prompt = f"Generate concise and descriptive alt text for the following image URL: {image_url}."
             return generate_with_ollama(image_url, prompt)
-        elif model == "azure_openai": # Use Azure OpenAI
-            return generate_with_azure_openai(image_url, alt_text, title_text)
+        elif model == "azure_openai":
+            return generate_with_azure_openai(image_url, model, 300, client)
         else:
             return f"Unsupported model: {model}"
 
@@ -565,14 +566,16 @@ if __name__ == "__main__":
 
         if not image_url:
             logging.warning(f"Row {idx + 1} is missing an Image URL. Skipping.")
-            row["Generated Alt Text"] = "Error: Missing image URL"
+            # row["Generated Alt Text"] = "Error: Missing image URL"
+            row["Generated Alt Text"] = generate_alt_text(image_url, model=selected_model, client=client)
             continue
 
         # Check if the suggestions indicate alt text needs improvement
         suggestions = row.get("Suggestions", "")
         if any(problematic in suggestions for problematic in PROBLEMATIC_SUGGESTIONS):
             logging.info(f"\nGenerating alt text for row {idx + 1} due to suggestion: {suggestions}. \n\n\n")
-            row["Generated Alt Text"] = generate_alt_text(image_url, model=selected_model)
+            # row["Generated Alt Text"] = generate_alt_text(image_url, model=selected_model)
+            row["Generated Alt Text"] = generate_alt_text(image_url, model=selected_model, client=client)
         else:
             logging.info(f"Alt text for row {idx + 1} seems fine. Skipping generation for {image_url}.")
             row["Generated Alt Text"] = "Skipped: Alt text sufficient \n\n\n"
