@@ -383,19 +383,37 @@ def generate_with_azure_openai(image_url, max_tokens=300):
 
 def check_image_exists(image_url):
     """
-    Check if the image URL exists by making a HEAD request to minimize bandwidth usage.
-    Returns True if the image exists, False otherwise.
+    Check if the image URL exists by making a HEAD request with redirects enabled.
+    If the URL contains query parameters, attempt checking the base URL without query strings.
     """
     try:
-        response = requests.head(image_url, timeout=10)
+        # First attempt with full URL (including query params)
+        response = requests.head(image_url, timeout=10, allow_redirects=True)
+
+        # If redirected, log the new URL
+        if response.history:
+            logging.info(f"Redirected: {image_url} → {response.url}")
+
+        # If image is accessible, return True
         if response.status_code == 200:
             return True
-        else:
-            logging.warning(f"Image not found or inaccessible: {image_url} (Status: {response.status_code})")
-            return False
-    except Exception as e:
+
+        # If the URL contains query parameters, try without them
+        parsed_url = urlparse(image_url)
+        if parsed_url.query:
+            stripped_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
+            logging.info(f"Retrying without query params: {stripped_url}")
+            response = requests.head(stripped_url, timeout=10, allow_redirects=True)
+            if response.status_code == 200:
+                return True
+
+        logging.warning(f"Image not found or inaccessible: {image_url} (Status: {response.status_code})")
+        return False
+
+    except requests.exceptions.RequestException as e:
         logging.error(f"Error checking image existence for {image_url}: {e}")
         return False
+    
 
 def extract_text_with_ocr(image_url):
     try:
