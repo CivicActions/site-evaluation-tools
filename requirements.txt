@@ -13,3 +13,5 @@ feedparser
 nltk
 textstat
 torch
+socket
+time
