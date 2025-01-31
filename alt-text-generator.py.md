@@ -21,11 +21,11 @@ This Python script is designed to generate meaningful alternative text (alt text
 
 **2\. Required Libraries**
 
-Install the required Python libraries using pip:
+Install the required Python libraries using pip3:
 
-```
-pip install transformers torch
-```
+Save: Save this content as requirements.txt.
+Install: Run `pip3 install -r requirements.txt` in your terminal.
+
 
 If you plan to export to Excel (optional):
 
