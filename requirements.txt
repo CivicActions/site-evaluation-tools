@@ -1,0 +1,14 @@
+transformers
+requests
+Pillow
+pytesseract
+opencv-python
+openai
+anthropic
+tenacity
+tqdm
+beautifulsoup4
+pandas
+feedparser
+nltk
+textstat
