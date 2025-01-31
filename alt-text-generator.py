@@ -15,7 +15,8 @@ import re
 # import openai
 from openai import OpenAIError
 # Initialize the OpenAI client
-from openai import OpenAI
+# from openai import OpenAI
+from openai import AzureOpenAI
 import pytesseract
 from io import BytesIO
 from tqdm import tqdm  # Import tqdm for progress bar
@@ -38,23 +39,31 @@ processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base
 model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
 
 #OpenAI API
-endpoint = os.getenv("ENDPOINT_URL", "https://civicactions-openai.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-08-01-preview")  
-deployment = os.getenv("DEPLOYMENT_NAME", "gpt-4o")  
-# subscription_key = os.getenv("AZURE_OPENAI_API_KEY", "REPLACE_WITH_YOUR_KEY_VALUE_HERE")  
 # export AZURE_OPENAI_API_KEY="your_api_key_here"
-# Ensure API key is set
+AZURE_OPENAI_ENDPOINT = "https://civicactions-openai.openai.azure.com/"
+DEPLOYMENT_NAME = "gpt-4o"
+API_VERSION = "2024-05-01-preview"  # ✅ Define API_VERSION before using it
 subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
+
+# Debugging: Log API credentials (excluding API key for security)
+# print(f"DEBUG: AZURE_OPENAI_ENDPOINT = {AZURE_OPENAI_ENDPOINT}")
+# print(f"DEBUG: DEPLOYMENT_NAME = {DEPLOYMENT_NAME}")
+# print(f"DEBUG: API_VERSION = {API_VERSION}")
+# print(f"DEBUG: AZURE_OPENAI_API_KEY = {subscription_key[:5]}********")
+
 if not subscription_key:
-    raise ValueError("AZURE_OPENAI_API_KEY environment variable is missing.")
+    raise ValueError("❌ ERROR: AZURE_OPENAI_API_KEY environment variable is missing.")
+
 try:
-    client = OpenAI(api_key=subscription_key)
+    client = AzureOpenAI(
+        api_key=subscription_key,
+        azure_endpoint=AZURE_OPENAI_ENDPOINT,  # Correct base URL
+        api_version=API_VERSION,
+    )
     logging.info("✅ Azure OpenAI client initialized successfully.")
 except Exception as e:
-    logging.error(f"❌ Failed to initialize Azure OpenAI client: {e}")
+    logging.exception(f"❌ Failed to initialize Azure OpenAI client: {e}")
     client = None
-
-
-print(f"DEBUG: API Key = {subscription_key}")
 
 def validate_anthropic_key(selected_model):
     """Ensure the Anthropic API key is set only if the 'anthropic' model is selected."""
@@ -295,64 +304,68 @@ def generate_with_ollama(image_path_or_url, prompt, model_name="llama3.2-vision:
 
 
 # def generate_with_azure_openai(image_url, model, max_tokens, client):
-def generate_with_azure_openai(image_url, model, max_tokens, client):
+def generate_with_azure_openai(image_url, max_tokens=300):
+    """Generate alt text using Azure OpenAI with a given image URL."""
+    
     if client is None:
         logging.error("❌ Azure OpenAI client is missing. Skipping this image.")
         return "Error: Azure OpenAI client missing"
+
     try:
-        logging.info("\n======================")
-        logging.info(f"Generating alt text for image: {image_url}\n")
+        logging.info(f"🔵 Processing Image: {image_url}")
+        print(f"🔵 Processing Image: {image_url}")
 
-        # Fetch and encode the image in base64
-        response = requests.get(image_url, stream=True)
-        response.raise_for_status()
-        image_base64 = base64.b64encode(response.content).decode("utf-8")
+        # ✅ Fetch & Encode Image
+        image_response = requests.get(image_url, stream=True)  # Renamed response
+        image_response.raise_for_status()
+        image_base64 = base64.b64encode(image_response.content).decode("utf-8")
 
-        # Determine MIME type
+        # ✅ Determine MIME Type
         mime_type = "image/jpeg"
         if image_url.lower().endswith(".png"):
             mime_type = "image/png"
         elif image_url.lower().endswith(".webp"):
             mime_type = "image/webp"
 
-        # Format the base64 data correctly for OpenAI
+        # ✅ Format Image for OpenAI API
         image_data = f"data:{mime_type};base64,{image_base64}"
 
-        # Construct messages payload
+        # ✅ Prepare Prompt
         messages = [
             {"role": "system", "content": "Generate concise and descriptive alt text for an image."},
-            {"role": "user", "content": "Describe this image in detail."},
-            {"role": "user", "content": [{"type": "image_url", "image_url": image_data}]}
+            {"role": "user", "content": "Describe this image in detail. Keep the response less than 40 words."},
+            {"role": "user", "content": [{"type": "image_url", "image_url": {"url": image_data}}]}  # Correct format
         ]
 
-        logging.info(f"Sending request to Azure OpenAI with {len(image_base64)}-character base64 image data.")
-
-        # Call Azure OpenAI API
-        response = client.chat.completions.create(
-            model=model,
+        response = client.chat.completions.create( # Use the client object directly
+            model=DEPLOYMENT_NAME,
             messages=messages,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
         )
 
-        # Extract and clean the response
-        if response and hasattr(response, 'choices') and response.choices:
+        # ✅ Extract Response
+        if hasattr(response, "choices") and response.choices:
             alt_text = response.choices[0].message.content.strip()
+            logging.info(f"✅ Generated Alt Text: {alt_text}")
+            print(f"✅ Generated Alt Text: {alt_text}")
+            return alt_text
         else:
-            alt_text = "Error: No valid response from OpenAI"
-            logging.error("Received an unexpected response format from OpenAI.")
+            logging.error("❌ No valid response from OpenAI")
+            return "Error: No valid response from OpenAI"
 
-        logging.info(f"Generated Alt Text: {alt_text}\n")
-        return alt_text
+    except requests.exceptions.HTTPError as http_err:
+        logging.error(f"❌ HTTP Error: {http_err.response.status_code} - {http_err.response.text}")
+        if http_err.response.status_code == 404:
+            logging.error(f"❌ 404 Error: Resource not found at {AZURE_OPENAI_ENDPOINT}")
+        return f"HTTP Error: {http_err.response.status_code}"
 
-    except OpenAIError as e:
-        logging.error(f"OpenAI API error: {str(e)}")
-        return "Error: OpenAI API issue"
-    except requests.RequestException as e:
-        logging.error(f"Request error: {str(e)}")
-        return "Error: Unable to retrieve image"
+    except requests.exceptions.RequestException as e:
+        logging.error(f"❌ Image retrieval error: {str(e)}")
+        return f"Error: Unable to retrieve image - {str(e)}"
+
     except Exception as e:
-        logging.error(f"Unexpected error: {str(e)}")
-        return "Error: Something went wrong"
+        logging.error(f"❌ Unexpected error: {str(e)}")
+        return f"Error: Something went wrong - {str(e)}"
     
 
 def check_image_exists(image_url):
@@ -532,7 +545,7 @@ def generate_alt_text(image_url, alt_text="", title_text="", model="blip", clien
             prompt = f"Generate concise and descriptive alt text for the following image URL: {image_url}."
             return generate_with_ollama(image_url, prompt)
         elif model == "azure_openai":
-            return generate_with_azure_openai(image_url, model, 300, client)
+            return generate_with_azure_openai(image_url, max_tokens=300)
         else:
             return f"Unsupported model: {model}"
 
