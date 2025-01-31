@@ -3,6 +3,7 @@ import os  # Add this import at the top of the script
 # Disable parallelism for Hugging Face tokenizers to avoid fork-related warnings
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+import socket
 import argparse
 import csv
 import json
@@ -84,6 +85,18 @@ PROBLEMATIC_SUGGESTIONS = [
 # Enable logging with timestamps
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 
+def check_internet(host="8.8.8.8", port=53, timeout=3):
+    """
+    Checks if the system has an active internet connection.
+    Attempts to connect to a well-known public DNS server (Google's 8.8.8.8).
+    Returns True if the connection is successful, otherwise False.
+    """
+    try:
+        socket.setdefaulttimeout(timeout)
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
+        return True
+    except socket.error:
+        return False
 
 def generate_with_blip(image_path_or_url, alt_text="", title_text=""):
     """
@@ -514,10 +527,16 @@ def clean_and_post_process_alt_text(generated_text):
 # Generate alt text using BLIP with alt_text and title_text integration
 def generate_alt_text(image_url, alt_text="", title_text="", model="blip", client=None):
     """Generate alt text using BLIP, Anthropic, Ollama, or Azure OpenAI."""
+
+    while not check_internet():  # ✅ If no internet, pause execution
+        print("⏳ Internet connection lost. Pausing scan... Retrying in 60 seconds.")
+        time.sleep(60)
+
     try:
-        # Ensure the client is provided for Azure OpenAI
-        if model == "azure_openai" and client is None:
-            raise ValueError("Azure OpenAI client is missing. Ensure it's properly initialized and passed.")
+        # Check if the image exists (Wrap in retry logic)
+        while not check_internet():  
+            print("⏳ Internet connection lost. Retrying in 60 seconds...")
+            time.sleep(60)
 
         # Skip SVG files (not supported)
         if image_url.lower().endswith(".svg"):
@@ -545,6 +564,9 @@ def generate_alt_text(image_url, alt_text="", title_text="", model="blip", clien
             prompt = f"Generate concise and descriptive alt text for the following image URL: {image_url}."
             return generate_with_ollama(image_url, prompt)
         elif model == "azure_openai":
+            # Ensure the client is provided for Azure OpenAI
+            if model == "azure_openai" and client is None:
+                raise ValueError("Azure OpenAI client is missing. Ensure it's properly initialized and passed.")
             return generate_with_azure_openai(image_url, max_tokens=300)
         else:
             return f"Unsupported model: {model}"
