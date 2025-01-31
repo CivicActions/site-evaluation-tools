@@ -33,9 +33,10 @@ This tool crawls websites or parses their sitemap to collect images and analyze 
 
 2. **Install Required Python Libraries**:
 
-   ```bash
-   pip3 install requests bs4 pandas tqdm textstat textblob
-   ```
+Install the required Python libraries using pip3:
+
+Save: Save this content as requirements.txt.
+Install: Run `pip3 install -r requirements.txt` in your terminal.
 
 ---
 
