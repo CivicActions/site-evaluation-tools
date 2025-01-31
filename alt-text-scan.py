@@ -1,4 +1,5 @@
 import os
+import socket
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
@@ -18,6 +19,8 @@ from nltk.corpus import stopwords
 from nltk.data import find
 from textstat import text_standard
 from datetime import datetime
+import time
+
 
 # Check if 'punkt' tokenizer is already downloaded
 try:
@@ -44,6 +47,18 @@ def text_analysis(alt_text):
     num_sentences = len([s for s in sentences if s.strip()])
     return num_words, num_sentences
 
+def check_internet(host="8.8.8.8", port=53, timeout=3):
+    """
+    Checks if the system has an active internet connection.
+    Attempts to connect to a well-known public DNS server (Google's 8.8.8.8).
+    Returns True if the connection is successful, otherwise False.
+    """
+    try:
+        socket.setdefaulttimeout(timeout)
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
+        return True
+    except socket.error:
+        return False
 
 def is_valid_image(url):
     if not url:
@@ -98,12 +113,7 @@ def extract_urls_from_sitemap(sitemap_url):
             print(f"Could not access {sitemap_url}, status code: {response.status_code}")
             return list(urls)
         root = ET.fromstring(response.content)
-        for elem in root.iter():
-            if elem.tag.endswith("loc"):
-                url = elem.text
-                # Skip non-HTML extensions
-                if not url.lower().endswith((".pdf", ".doc", ".xls")):
-                    urls.add(url)
+        urls.update(elem.text for elem in root.iter() if elem.tag.endswith("loc"))
     except Exception as e:
         print(f"Error parsing sitemap {sitemap_url}: {e}")
     return list(urls)
@@ -137,8 +147,8 @@ def parse_sitemap(sitemap_url, base_domain, headers=None, depth=3):
     ]
 
     urls = set()
-    if depth <= 0:
-        print(f"Reached maximum recursion depth for {sitemap_url}.")
+    if depth <= 0 or len(urls) > 50_000:  # Stop parsing if too many URLs
+        print(f"⚠️ Reached max depth or too many URLs ({len(urls)}). Stopping sitemap parsing.")
         return urls
 
     try:
@@ -150,7 +160,12 @@ def parse_sitemap(sitemap_url, base_domain, headers=None, depth=3):
                 "Referer": "https://www.hhs.gov/",
             }
 
-        response = requests.get(sitemap_url, headers=headers, timeout=10)
+        try:
+            print(f"🔍 Debug: Requesting sitemap - {sitemap_url}")
+            response = requests.get(sitemap_url, headers=headers, timeout=10)
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Error: Could not fetch sitemap {sitemap_url}. Error: {e}")
+            return urls  # Return what we have so far
         if response.status_code == 403:
             print(f"Access to {sitemap_url} is forbidden (403). Ensure your requests are not blocked by the server.")
             return urls
@@ -294,36 +309,39 @@ def crawl_page(url, images_data, url_progress, domain, throttle, consecutive_err
     """
     Crawls a single page, extracting image data with rate limiting and error handling.
     """
-    # Check if the URL is an HTML page
     if not is_html_url(url):
-        print(f"Skipped non-HTML URL: {url}")
-        return consecutive_errors  # Skip this URL without incrementing error count
+        return consecutive_errors  # # Skip this URL without incrementing error count
 
-    url_progress.update(1)  # Update the progress bar
+    url_progress.update(1)
     start_time = time.time()
 
+    while not check_internet():  # ✅ If no internet, pause execution
+        print("⏳ Internet connection lost. Pausing scan... Retrying in 60 seconds.")
+        time.sleep(60)
+
     try:
-        print(f"Attempting to crawl: {url}")
-        response = requests.get(url, timeout=10)
+        # print(f"Attempting to crawl: {url}")
+        try:
+            print(f"🔍 Debug: Fetching URL - {url}")
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()  # Ensure we get a successful response
+        except requests.exceptions.Timeout:
+            print(f"⏳ Warning: Timeout while fetching {url}. Skipping this URL.")
+            return []  # Skip and move on
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Error: Failed to fetch {url}. Error: {e}")
+            return []
         load_time = time.time() - start_time
 
-        # Handle non-200 HTTP responses
         if response.status_code != 200:
             print(f"Non-200 status code for {url}: {response.status_code}")
             return consecutive_errors + 1
 
-        # Check if the Content-Type is HTML
-        content_type = response.headers.get('Content-Type', '').lower()
-        if "text/html" not in content_type:
-            print(f"Skipped: Non-HTML Content-Type for {url} (Content-Type: {content_type})")
-            return consecutive_errors  # Skip non-HTML content without incrementing error count
-
-        # Parse the HTML content
         soup = BeautifulSoup(response.text, 'html.parser')
         img_tags = soup.find_all('img')
         print(f"Found {len(img_tags)} <img> tags on {url}")
 
-        # Keep track of seen images to avoid duplicates
+        # Keep track of seen images to skip duplicates
         seen_images = set()
 
         for img in img_tags:
@@ -332,20 +350,17 @@ def crawl_page(url, images_data, url_progress, domain, throttle, consecutive_err
                 print(f"Skipping <img> tag with no src attribute on {url}")
                 continue
 
-            # Construct the full image URL
             img_url = urljoin(url, img_src)
             if img_url in seen_images:
                 print(f"Duplicate image skipped: {img_url}")
                 continue
             seen_images.add(img_url)
 
-            # Process valid images
             if is_valid_image(img_url):
                 # Retrieve and store image metadata
                 process_image(img_url, img, url, domain, images_data)
 
-        print(f"Successfully processed: {url} (Load Time: {load_time:.2f}s)")
-        return 0  # Reset consecutive errors on success
+        return 0
 
     except Exception as e:
         print(f"Error processing {url}: {e}")
@@ -389,8 +404,9 @@ def get_images(domain, sample_size=100, throttle=0, crawl_only=False):
             print(f"Sitemap not found or invalid. Falling back to crawling {domain}")
             all_urls = crawl_site(domain, max_pages=sample_size, throttle=throttle)
 
-    sampled_urls = random.sample(all_urls, min(sample_size, len(all_urls)))
-    print(f"Processing {len(sampled_urls)} sampled URLs from {len(all_urls)} total found URLs.")
+        print(f"✅ Debug: Sampling {sample_size} random URLs from {len(all_urls)} total URLs...")
+        sampled_urls = random.sample(all_urls, min(sample_size, len(all_urls)))
+        print(f"✅ Debug: Successfully selected {len(sampled_urls)} URLs!")
 
     url_progress = tqdm(total=len(sampled_urls), desc="Processing URLs", unit="url")
     consecutive_errors = 0
@@ -471,7 +487,8 @@ def analyze_alt_text(images_df, domain_or_file, readability_threshold=20):
 
     suggestions = []
 
-    # Suspicious and meaningless alt text
+    # Define suspicious and meaningless alt text values
+    wcag_failure_values = ["Null", "TBD", "None", "Alt Text", ""]
     suspicious_words = ['image of', 'graphic of', 'picture of', 'photo of', 'placeholder', 'spacer', 'tbd', 'todo', 'to do']
     meaningless_alt = ['alt', 'chart', 'decorative', 'image', 'graphic', 'photo', 'placeholder image', 'spacer', 'tbd', 'todo', 'to do', 'undefined']
 
@@ -482,26 +499,29 @@ def analyze_alt_text(images_df, domain_or_file, readability_threshold=20):
         size_kb = row.get('Size (KB)', 0)
         suggestion = []
 
+        # Check for WCAG 1.1.1 failures
+        if alt_text in wcag_failure_values or alt_text.strip().lower() == 'null':
+            suggestion.append("WCAG 1.1.1 Failure: Alt text is empty or invalid.")
+
         # Large image size
         if isinstance(size_kb, (int, float)) and size_kb > 250:
-            suggestion.append("Consider reducing the size of the image for a better user experience. ")
+            suggestion.append("Consider reducing the size of the image for a better user experience.")
 
-        # Check for empty or decorative alt text
+        # Check for suspicious or meaningless alt text
         if pd.isna(alt_text) or not alt_text.strip():
             suggestion.append("No alt text was provided. Clear WCAG failure.")
         else:
-            # Suspicious or meaningless words
             if any(word in alt_text.lower() for word in suspicious_words):
-                suggestion.append("Avoid phrases like 'image of', 'graphic of', or 'todo' in alt text. ")
+                suggestion.append("Avoid phrases like 'image of', 'graphic of', or 'todo' in alt text.")
             if alt_text.lower() in meaningless_alt:
-                suggestion.append("Alt text appears to be meaningless. Replace it with descriptive content. ")
+                suggestion.append("Alt text appears to be meaningless. Replace it with descriptive content.")
 
             # Text analysis
             words, sentences = text_analysis(alt_text)
             if len(alt_text) < 25:
-                suggestion.append("Alt text seems too short. Consider providing more context. ")
+                suggestion.append("Alt text seems too short. Consider providing more context.")
             if len(alt_text) > 250:
-                suggestion.append("Alt text may be too long. Consider shortening. ")
+                suggestion.append("Alt text may be too long. Consider shortening.")
             if words / max(sentences, 1) > readability_threshold:
                 suggestion.append("Consider simplifying the text.")
 
@@ -558,12 +578,16 @@ def main(sample_size=100, throttle=0, crawl_only=False):
         print("No URLs found. Exiting.")
         exit(1)
 
-    # Limit URLs to the sample size
-    sampled_urls = random.sample(urls, min(sample_size, len(urls)))
-    if len(sampled_urls) < sample_size:
-        print(f"Requested {sample_size} URLs, but only {len(sampled_urls)} URLs are available.")
-    else:
-        print(f"Processing {len(sampled_urls)} sampled URLs from {len(urls)} total found URLs.")
+    # ✅ Filter only HTML pages before sampling
+    html_urls = [url for url in urls if is_html_url(url)]  
+
+    if not html_urls:
+        print("No valid HTML pages found. Exiting.")
+        exit(1)
+
+    # ✅ Sample randomly from only HTML pages
+    sampled_urls = random.sample(html_urls, min(sample_size, len(html_urls)))
+    print(f"Processing {len(sampled_urls)} sampled HTML URLs from {len(html_urls)} total found HTML URLs.")
 
     # Crawl and parse each page to extract images
     images_data = defaultdict(lambda: {
@@ -573,41 +597,24 @@ def main(sample_size=100, throttle=0, crawl_only=False):
         "source_urls": [],
         "size_kb": 0
     })
-    processed_urls = 0
-    temp_file = "temp_images_data.csv"
+    for url in tqdm(sampled_urls, desc="Crawling URLs for images", unit="url"):
+        try:
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200 and 'text/html' in response.headers.get('Content-Type', '').lower():
+                soup = BeautifulSoup(response.text, 'html.parser')
+                img_tags = soup.find_all('img')
+                for img in img_tags:
+                    img_src = img.get('src')
+                    if img_src:
+                        img_url = urljoin(url, img_src)
+                        process_image(img_url, img, url, args.domain if args.domain else "unknown", images_data)
+            else:
+                print(f"Skipped non-HTML URL: {url}")
+        except Exception as e:
+            print(f"Failed to crawl {url}: {e}")
 
-    try:
-        url_progress = tqdm(total=len(sampled_urls), desc="Processing URLs", unit="url")
-        for url in sampled_urls:
-            consecutive_errors = crawl_page(url, images_data, url_progress, args.domain if args.domain else "unknown", throttle, 0)
-            processed_urls += 1
-
-            # Save progress after every 100 URLs
-            if processed_urls % 100 == 0:
-                save_partial_results(images_data, temp_file)
-
-            # Auto-throttle if necessary
-            if consecutive_errors > 5:
-                throttle = min(throttle + 1, 10)
-                print(f"Auto-throttling applied. Current delay: {throttle}s")
-
-        url_progress.close()
-
-    except KeyboardInterrupt:
-        print("Script interrupted by user. Saving progress...")
-        save_partial_results(images_data, temp_file)
-        print(f"Progress saved to {temp_file}. Resume processing from this file.")
-        exit(1)
-
-    except Exception as e:
-        print(f"Unexpected error occurred: {e}. Saving progress...")
-        save_partial_results(images_data, temp_file)
-        print(f"Progress saved to {temp_file}. Investigate the issue and resume processing.")
-        exit(1)
-
-    # Final results
+    # Convert images_data to DataFrame
     filtered_data = {k: v for k, v in images_data.items() if v["count"] > 0}
-    print(f"Processed {len(filtered_data)} valid images.")
     images_df = pd.DataFrame([
         {
             "Image_url": k,
@@ -626,28 +633,6 @@ def main(sample_size=100, throttle=0, crawl_only=False):
     # Run analysis
     print(f"Running analysis on {len(images_df)} images...")
     analyze_alt_text(images_df, input_file)
-
-def save_partial_results(images_data, temp_file):
-    """
-    Save partial results to a temporary CSV file.
-    """
-    filtered_data = {k: v for k, v in images_data.items() if v["count"] > 0}
-    temp_df = pd.DataFrame([
-        {
-            "Image_url": k,
-            "Alt_text": v["alt_text"],
-            "Title": v["title"],
-            "Longdesc": v.get("longdesc"),
-            "Aria_label": v.get("aria_label"),
-            "Aria_describedby": v.get("aria_describedby"),
-            "Count": v["count"],
-            "Source_URLs": ", ".join(v["source_urls"]),
-            "Size (KB)": round(v["size_kb"], 2)
-        }
-        for k, v in filtered_data.items()
-    ])
-    temp_df.to_csv(temp_file, index=False, encoding="utf-8")
-    print(f"Partial results saved to {temp_file}.")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Scan a website or file for alt text analysis.")
