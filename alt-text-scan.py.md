@@ -35,8 +35,9 @@ This tool crawls websites or parses their sitemap to collect images and analyze 
 
 Install the required Python libraries using pip3:
 
-Save: Save this content as requirements.txt.
-Install: Run `pip3 install -r requirements.txt` in your terminal.
+Save: Save the requirements.txt and install the following in your terminal:
+
+```pip3 install -r requirements.txt```
 
 ---
 
