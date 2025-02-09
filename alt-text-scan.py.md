@@ -39,6 +39,20 @@ Save: Save the requirements.txt and install the following in your terminal:
 
 ```pip3 install -r requirements.txt```
 
+**Alternate Installation**
+
+1. Set Up a Python Virtual Environment
+It is recommended to use a virtual environment to avoid conflicts with system-wide Python packages. To set up a virtual environment:
+
+```bash
+# Create a virtual environment
+python3 -m venv venv
+
+# Activate the virtual environment
+source venv/bin/activate  # On macOS/Linux
+venv\Scripts\activate     # On Windows
+```
+
 ---
 
 ## Usage
