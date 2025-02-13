@@ -1,3 +1,7 @@
+# TODO
+# - Remove hidden text, as if an image is removed from the DOM, it doesn't matter for accessibility. It just needs to be noted in the spreadsheet.
+# - Support multi-page Sitemap.xml files https://www.nsf.gov/sitemap.xml
+
 import os
 import socket
 import requests
