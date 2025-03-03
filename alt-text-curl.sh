@@ -1,4 +1,35 @@
 #!/bin/bash
+#
+# Script Name: image_alt_text_generator.sh
+# Description: This script generates a concise and descriptive alt text for an image 
+#              using the Ollama API. It supports both local image files and remote 
+#              image URLs.
+#
+# Usage:
+#   ./image_alt_text_generator.sh <image_url_or_file> [model_name] [custom_prompt]
+#
+# Arguments:
+#   <image_url_or_file>  - Required. The local file path or URL of the image.
+#   [model_name]         - Optional. AI model to use (default: "llama3.2-vision").
+#   [custom_prompt]      - Optional. Custom text prompt for image analysis 
+#                          (default: "Describe the image. Be concise and descriptive...").
+#
+# Features:
+# - Accepts an image file path or a URL as input.
+# - Downloads the image if a URL is provided.
+# - Converts images to Base64 for API compatibility.
+# - Uses the Ollama API to generate a descriptive alt text.
+# - Handles various error cases, such as invalid files or failed downloads.
+#
+# Dependencies:
+# - `curl`: Required for downloading images and making API requests.
+# - `base64`: Needed to encode images.
+# - `jq`: Used for parsing JSON responses from the API.
+#
+# Example Usage:
+#   ./image_alt_text_generator.sh example.jpg
+#   ./image_alt_text_generator.sh https://example.com/image.png
+#   ./image_alt_text_generator.sh image.jpg "custom-model" "Describe the scene in detail."
 
 # Check if the user provided the required argument
 if [ $# -lt 1 ]; then
