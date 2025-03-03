@@ -1,7 +1,3 @@
-# TODO
-# - Remove hidden text, as if an image is removed from the DOM, it doesn't matter for accessibility. It just needs to be noted in the spreadsheet.
-# - Support multi-page Sitemap.xml files https://www.nsf.gov/sitemap.xml
-
 import os
 import socket
 import requests
@@ -109,51 +105,26 @@ def extract_urls_from_rss(feed_url):
         return []
 
 # Function to parse a sitemap and extract URLs
-def extract_urls_from_sitemap(sitemap_url):
-    urls = set()
-    try:
-        response = requests.get(sitemap_url, timeout=10)
-        if response.status_code != 200:
-            print(f"Could not access {sitemap_url}, status code: {response.status_code}")
-            return list(urls)
-        root = ET.fromstring(response.content)
-        urls.update(elem.text for elem in root.iter() if elem.tag.endswith("loc"))
-    except Exception as e:
-        print(f"Error parsing sitemap {sitemap_url}: {e}")
-    return list(urls)
-
-def parse_sitemap(sitemap_url, base_domain, headers=None, depth=3):
+def extract_urls_from_sitemap(sitemap_url, headers=None, depth=3):
     """
-    Parses a sitemap to extract URLs, handling sitemaps with non-XML elements.
-    Ensures specific pages are always included. Supports recursive sitemap parsing up to a specified depth.
+    Parses a sitemap and extracts URLs, supporting multi-part sitemaps.
     
     Args:
-        sitemap_url (str): URL of the sitemap to parse.
-        base_domain (str): The base domain for constructing full URLs.
-        headers (dict, optional): Headers to use for the HTTP requests (e.g., User-Agent).
+        sitemap_url (str): The URL of the sitemap.
+        headers (dict, optional): HTTP headers for the request.
         depth (int): Maximum recursion depth for nested sitemaps.
-    
+
     Returns:
-        set: A set of URLs extracted from the sitemap.
+        list: A list of extracted URLs.
     """
     # Define extensions to exclude
     EXCLUDED_EXTENSIONS = ('.pdf', '.doc', '.docx', '.zip', '.rar', '.xlsx', '.ppt', '.pptx', '.xls', '.txt', '.rss')
 
-    # Pages to always include if they exist
-    ALWAYS_INCLUDE = [
-        '/', 
-        '/accessibility', 
-        '/search', 
-        '/privacy', 
-        '/security', 
-        '/contact', 
-        '/about-us'
-    ]
-
     urls = set()
-    if depth <= 0 or len(urls) > 50_000:  # Stop parsing if too many URLs
+
+    if depth <= 0 or len(urls) > 50_000:  # Prevent excessive recursion or infinite loops
         print(f"⚠️ Reached max depth or too many URLs ({len(urls)}). Stopping sitemap parsing.")
-        return urls
+        return list(urls)
 
     try:
         # Set default headers if none are provided
@@ -161,58 +132,121 @@ def parse_sitemap(sitemap_url, base_domain, headers=None, depth=3):
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                "Referer": "https://www.hhs.gov/",
+                "Referer": sitemap_url,  # Helps with servers that block unknown requests
             }
 
-        try:
-            print(f"🔍 Debug: Requesting sitemap - {sitemap_url}")
-            response = requests.get(sitemap_url, headers=headers, timeout=10)
-        except requests.exceptions.RequestException as e:
-            print(f"❌ Error: Could not fetch sitemap {sitemap_url}. Error: {e}")
-            return urls  # Return what we have so far
+        print(f"🔍 Fetching sitemap: {sitemap_url}")
+        response = requests.get(sitemap_url, headers=headers, timeout=10)
+
         if response.status_code == 403:
-            print(f"Access to {sitemap_url} is forbidden (403). Ensure your requests are not blocked by the server.")
+            print(f"❌ Access to {sitemap_url} is forbidden (403).")
+            return list(urls)
+        if response.status_code != 200:
+            print(f"❌ Could not access {sitemap_url}, status code: {response.status_code}")
+            return list(urls)
+
+        content = response.content
+
+        # Multi-part sitemap handling
+        if b"<sitemapindex" in content:  # If the sitemap contains links to other sitemaps
+            print(f"🗂️ Found multi-part sitemap at {sitemap_url}. Fetching nested sitemaps...")
+            root = ET.fromstring(content)
+            for sitemap in root.iter("{http://www.sitemaps.org/schemas/sitemap/0.9}sitemap"):
+                loc = sitemap.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc")
+                if loc is not None and loc.text:
+                    nested_sitemap = loc.text.strip()
+                    print(f"↪️ Fetching nested sitemap: {nested_sitemap}")
+                    urls.update(extract_urls_from_sitemap(nested_sitemap, headers, depth - 1))
+            return list(urls)  # Return all collected URLs
+
+        # Standard URL sitemap processing
+        elif b"<urlset" in content:
+            print(f"📄 Processing standard sitemap: {sitemap_url}")
+            root = ET.fromstring(content)
+            for url_elem in root.iter("{http://www.sitemaps.org/schemas/sitemap/0.9}url"):
+                loc = url_elem.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc")
+                if loc is not None and loc.text:
+                    full_url = loc.text.strip()
+                    if not full_url.lower().endswith(EXCLUDED_EXTENSIONS):  # Skip excluded file types
+                        urls.add(full_url)
+
+        else:
+            print(f"⚠️ Sitemap at {sitemap_url} is not valid XML.")
+
+    except ET.ParseError:
+        print(f"❌ Failed to parse XML content from {sitemap_url}.")
+    except Exception as e:
+        print(f"❌ Error processing sitemap {sitemap_url}: {e}")
+
+    return list(urls)
+
+
+def parse_sitemap(sitemap_url, base_domain, headers=None, depth=3):
+    """
+    Parses a sitemap to extract URLs, handling multi-part sitemaps and non-XML elements.
+    Ensures only HTML pages are selected. Supports recursive sitemap parsing up to a specified depth.
+
+    Args:
+        sitemap_url (str): URL of the sitemap to parse.
+        base_domain (str): The base domain for constructing full URLs.
+        headers (dict, optional): Headers to use for the HTTP requests.
+        depth (int): Maximum recursion depth for nested sitemaps.
+
+    Returns:
+        set: A set of valid HTML URLs.
+    """
+    # Define extensions to exclude
+    EXCLUDED_EXTENSIONS = (
+        '.pdf', '.doc', '.docx', '.zip', '.rar', '.xlsx', '.ppt', '.pptx',
+        '.xls', '.txt', '.rss', '.xml', '.json', '.csv', '.mp3', '.mp4', '.avi'
+    )
+
+    urls = set()
+
+    if depth <= 0 or len(urls) > 50_000:
+        print(f"⚠️ Reached max depth or too many URLs ({len(urls)}). Stopping sitemap parsing.")
+        return urls
+
+    try:
+        if headers is None:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Referer": sitemap_url,
+            }
+
+        print(f"🔍 Fetching sitemap: {sitemap_url}")
+        response = requests.get(sitemap_url, headers=headers, timeout=10)
+
+        if response.status_code == 403:
+            print(f"❌ Access to {sitemap_url} is forbidden (403).")
             return urls
         if response.status_code != 200:
-            print(f"Could not access {sitemap_url}, status code: {response.status_code}")
+            print(f"❌ Could not access {sitemap_url}, status code: {response.status_code}")
             return urls
 
         content = response.content
 
-        # Process valid XML sitemaps
-        if content.startswith(b"<?xml") or b"<sitemapindex" in content or b"<urlset" in content:
-            try:
-                root = ET.fromstring(content)
-                for elem in root.iter():
-                    # Handle nested sitemaps
-                    if elem.tag.endswith("sitemap") and elem.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc") is not None:
-                        nested_sitemap = elem.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc").text
-                        urls.update(parse_sitemap(nested_sitemap, base_domain, headers, depth - 1))
-                    # Handle URLs in the sitemap
-                    elif elem.tag.endswith("url") and elem.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc") is not None:
-                        url = elem.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc").text
-                        # Skip URLs with excluded extensions
-                        if not url.lower().endswith(EXCLUDED_EXTENSIONS):
-                            urls.add(url)
-            except ET.ParseError:
-                print(f"Failed to parse XML content from {sitemap_url} - falling back to manual crawling.")
-        else:
-            print(f"Sitemap at {sitemap_url} is not valid XML.")
+        if b"<sitemapindex" in content:
+            print(f"🗂️ Found multi-part sitemap at {sitemap_url}. Fetching nested sitemaps...")
+            root = ET.fromstring(content)
+            for sitemap in root.iter("{http://www.sitemaps.org/schemas/sitemap/0.9}sitemap"):
+                loc = sitemap.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc")
+                if loc is not None and loc.text:
+                    urls.update(parse_sitemap(loc.text.strip(), base_domain, headers, depth - 1))
+            return urls
 
-        # Add always-include pages
-        for page in ALWAYS_INCLUDE:
-            full_url = urljoin(base_domain, page)
-            if full_url not in urls:
-                try:
-                    # Check if the page exists
-                    response = requests.head(full_url, headers=headers, timeout=5, allow_redirects=True)
-                    if response.status_code == 200 and 'text/html' in response.headers.get('Content-Type', '').lower():
-                        urls.add(full_url)
-                except Exception as e:
-                    print(f"Could not check existence of {full_url}: {e}")
+        elif b"<urlset" in content:
+            root = ET.fromstring(content)
+            for url_elem in root.iter("{http://www.sitemaps.org/schemas/sitemap/0.9}url"):
+                loc = url_elem.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc")
+                if loc is not None and loc.text and is_html_url(loc.text.strip()):
+                    urls.add(loc.text.strip())
 
+    except ET.ParseError:
+        print(f"❌ Failed to parse XML content from {sitemap_url}.")
     except Exception as e:
-        print(f"Failed to parse sitemap {sitemap_url}: {e}")
+        print(f"❌ Error processing sitemap {sitemap_url}: {e}")
 
     return urls
 
@@ -283,29 +317,53 @@ def get_relative_url(url, base_domain):
     return url
 
 
+def is_image_visible(img):
+    """
+    Checks if an image is visible in the DOM.
+
+    Returns:
+        True if the image is visible, False otherwise.
+    """
+    parent = img.find_parent()
+
+    # Check for CSS-based hiding
+    style = img.get('style', '') + (parent.get('style', '') if parent else '')
+    if any(hidden in style.lower() for hidden in ['display: none', 'visibility: hidden', 'opacity: 0']):
+        return False
+
+    # Check for aria-hidden
+    if img.get('aria-hidden') == 'true' or (parent and parent.get('aria-hidden') == 'true'):
+        return False
+
+    # Check for HTML hidden attribute
+    if img.has_attr('hidden') or (parent and parent.has_attr('hidden')):
+        return False
+
+    return True
+
 def is_html_url(url):
+    """
+    Checks whether a URL points to an HTML document.
+    
+    Returns:
+        True if the URL is an HTML page, False otherwise.
+    """
     try:
         response = requests.head(url, timeout=10, allow_redirects=True)
         content_type = response.headers.get('Content-Type', '').lower()
 
         # If Content-Type is missing, fallback to GET and inspect the content
         if not content_type:
-            print(f"Missing Content-Type for {url} - falling back to GET request.")
             response = requests.get(url, timeout=10, allow_redirects=True)
             content_type = response.headers.get('Content-Type', '').lower()
-
-            # Fallback to simple HTML detection based on the content
-            if '<html' in response.text.lower():
-                print(f"Assuming HTML for {url} based on content inspection.")
-                return True
 
         if 'text/html' in content_type:
             return True
 
-        print(f"Skipped: Non-HTML Content-Type - {url} (Content-Type: {content_type}, Headers: {response.headers})")
+        print(f"⚠️ Skipping non-HTML content: {url} ({content_type})")
         return False
     except Exception as e:
-        print(f"Error while checking URL: {url}, {e}")
+        print(f"⚠️ Error checking content type for {url}: {e}")
         return False
 
 
@@ -354,6 +412,10 @@ def crawl_page(url, images_data, url_progress, domain, throttle, consecutive_err
                 print(f"Skipping <img> tag with no src attribute on {url}")
                 continue
 
+            if not is_image_visible(img):  # New visibility check
+                print(f"Skipping hidden image: {img_src} on {url}")
+                continue
+
             img_url = urljoin(url, img_src)
             if img_url in seen_images:
                 print(f"Duplicate image skipped: {img_url}")
@@ -361,7 +423,6 @@ def crawl_page(url, images_data, url_progress, domain, throttle, consecutive_err
             seen_images.add(img_url)
 
             if is_valid_image(img_url):
-                # Retrieve and store image metadata
                 process_image(img_url, img, url, domain, images_data)
 
         return 0
@@ -479,59 +540,62 @@ def process_image(img_url, img, page_url, domain, images_data):
         images_data[img_url]["source_urls"].append(source_url)
 
 
+def analyze_alt_text(images_df, domain_or_file, sample_size, scan_type="sitemap"):
+    """
+    Analyzes alt text and saves results to a CSV file with a custom name.
 
-def analyze_alt_text(images_df, domain_or_file, readability_threshold=20):
-    # Skip analysis if no data is available
+    Args:
+        images_df (pd.DataFrame): Dataframe containing image data.
+        domain_or_file (str): The domain or file used for scanning.
+        sample_size (int): The number of URLs selected for scanning.
+        scan_type (str): The type of scan (default: "sitemap").
+    """
     if images_df.empty:
-        print("No image data available for analysis. Exiting.")
+        print("❌ No image data available for analysis. Exiting.")
         return
 
+    domain_name = urlparse(domain_or_file).netloc if domain_or_file.startswith("http") else os.path.basename(domain_or_file)
     current_date = datetime.now().strftime("%Y-%m-%d")
+    output_file = f"{domain_name}_{scan_type}_{sample_size}_images_{current_date}.csv"
     images_df["Date"] = current_date
 
     suggestions = []
 
-    # Define suspicious and meaningless alt text values
-    wcag_failure_values = ["Null", "TBD", "None", "Alt Text", ""]
-    suspicious_words = ['image of', 'graphic of', 'picture of', 'photo of', 'placeholder', 'spacer', 'tbd', 'todo', 'to do']
-    meaningless_alt = ['alt', 'chart', 'decorative', 'image', 'graphic', 'photo', 'placeholder image', 'spacer', 'tbd', 'todo', 'to do', 'undefined']
+    wcag_failure_values = ["null", "tbd", "none", "alt text", ""]
+    suspicious_words = ['image of', 'graphic of', 'picture of', 'photo of', 'placeholder', 'spacer', 'tbd', 'todo']
+    meaningless_alt = ['alt', 'chart', 'decorative', 'image', 'graphic', 'photo', 'placeholder image', 'spacer', 'tbd', 'todo', 'undefined']
 
     for _, row in images_df.iterrows():
         alt_text = row.get('Alt_text', "")
+        if alt_text is None:
+            alt_text = ""  # Fix to prevent AttributeError
+
         img_url = row.get('Image_url', "")
-        title_text = row.get('Title', "") or ""  # Ensure title_text is not None
+        title_text = row.get('Title', "") or ""
         size_kb = row.get('Size (KB)', 0)
         suggestion = []
 
-        # Check for WCAG 1.1.1 failures
-        if alt_text in wcag_failure_values or alt_text.strip().lower() == 'null':
+        if not alt_text.strip() or alt_text.strip().lower() in wcag_failure_values:
             suggestion.append("WCAG 1.1.1 Failure: Alt text is empty or invalid.")
 
-        # Large image size
         if isinstance(size_kb, (int, float)) and size_kb > 250:
-            suggestion.append("Consider reducing the size of the image for a better user experience.")
+            suggestion.append("Consider reducing the image size for a better user experience.")
 
-        # Check for suspicious or meaningless alt text
-        if pd.isna(alt_text) or not alt_text.strip():
-            suggestion.append("No alt text was provided. Clear WCAG failure.")
-        else:
-            if any(word in alt_text.lower() for word in suspicious_words):
-                suggestion.append("Avoid phrases like 'image of', 'graphic of', or 'todo' in alt text.")
-            if alt_text.lower() in meaningless_alt:
-                suggestion.append("Alt text appears to be meaningless. Replace it with descriptive content.")
+        if any(word in alt_text.lower() for word in suspicious_words):
+            suggestion.append("Avoid phrases like 'image of', 'graphic of', or 'todo' in alt text.")
+        if alt_text.lower() in meaningless_alt:
+            suggestion.append("Alt text appears meaningless. Replace it with a descriptive value.")
 
-            # Text analysis
-            words, sentences = text_analysis(alt_text)
-            if len(alt_text) < 25:
-                suggestion.append("Alt text seems too short. Consider providing more context.")
-            if len(alt_text) > 250:
-                suggestion.append("Alt text may be too long. Consider shortening.")
-            if words / max(sentences, 1) > readability_threshold:
-                suggestion.append("Consider simplifying the text.")
+        words, sentences = text_analysis(alt_text)
+        if len(alt_text) < 25:
+            suggestion.append("Alt text seems too short. Provide more context.")
+        if len(alt_text) > 250:
+            suggestion.append("Alt text may be too long. Consider shortening.")
+        if words / max(sentences, 1) > 20:
+            suggestion.append("Consider simplifying the text.")
 
-        # Title attribute check
-        if title_text.strip():  # Safely handle cases where title_text is None
-            suggestion.append("Consider removing the title text. Quite often title text reduces the usability for screen reader users.")
+        if title_text.strip():
+            suggestion.append("Consider removing the title text. Often, it reduces usability for screen readers.")
 
         if not suggestion:
             suggestion.append("Alt-text passes automated tests, but does it make sense to a person?")
@@ -539,20 +603,14 @@ def analyze_alt_text(images_df, domain_or_file, readability_threshold=20):
         suggestions.append("; ".join(suggestion))
 
     images_df['Suggestions'] = suggestions
-
-    # Generate output filename
-    base_name = os.path.basename(domain_or_file)  # Get the base file name (e.g., cms-most-popular.json)
-    name_without_ext = os.path.splitext(base_name)[0]  # Remove file extension (e.g., cms-most-popular)
-    output_file = f"{name_without_ext}_images.csv"  # Append "_images.csv"
-
-    # Save to CSV
     images_df.to_csv(output_file, index=False, encoding='utf-8')
-    print(f"Data saved to {output_file}")
+    print(f"✅ Data saved to {output_file}")
 
 
 def main(sample_size=100, throttle=0, crawl_only=False):
     """
     Main function to collect image data and analyze alt text, with throttling.
+    Ensures 200 unique HTML pages are selected before processing.
     """
     urls = []
 
@@ -579,19 +637,30 @@ def main(sample_size=100, throttle=0, crawl_only=False):
         input_file = args.domain  # Use the domain name as a placeholder
 
     if not urls:
-        print("No URLs found. Exiting.")
+        print("❌ No URLs found. Exiting.")
         exit(1)
 
-    # ✅ Filter only HTML pages before sampling
-    html_urls = [url for url in urls if is_html_url(url)]  
+    # ✅ Ensure all selected URLs are valid HTML pages before sampling
+    valid_html_urls = set()
+    attempts = 0
 
-    if not html_urls:
-        print("No valid HTML pages found. Exiting.")
-        exit(1)
+    print(f"🔍 Checking {len(urls)} URLs to select {sample_size} valid HTML pages...")
 
-    # ✅ Sample randomly from only HTML pages
-    sampled_urls = random.sample(html_urls, min(sample_size, len(html_urls)))
-    print(f"Processing {len(sampled_urls)} sampled HTML URLs from {len(html_urls)} total found HTML URLs.")
+    while len(valid_html_urls) < sample_size and attempts < len(urls) * 2:
+        random.shuffle(urls)  # Shuffle to ensure random selection
+        for url in urls:
+            if len(valid_html_urls) >= sample_size:
+                break  # Stop if we reach the desired count
+            if url not in valid_html_urls and is_html_url(url):
+                valid_html_urls.add(url)
+        attempts += 1
+
+    valid_html_urls = list(valid_html_urls)  # Convert back to a list
+
+    if len(valid_html_urls) < sample_size:
+        print(f"⚠️ Warning: Only found {len(valid_html_urls)} valid HTML pages.")
+
+    print(f"✅ Selected {len(valid_html_urls)} valid HTML URLs for processing.")
 
     # Crawl and parse each page to extract images
     images_data = defaultdict(lambda: {
@@ -601,7 +670,8 @@ def main(sample_size=100, throttle=0, crawl_only=False):
         "source_urls": [],
         "size_kb": 0
     })
-    for url in tqdm(sampled_urls, desc="Crawling URLs for images", unit="url"):
+
+    for url in tqdm(valid_html_urls, desc="Crawling URLs for images", unit="url"):
         try:
             response = requests.get(url, timeout=10)
             if response.status_code == 200 and 'text/html' in response.headers.get('Content-Type', '').lower():
@@ -613,9 +683,9 @@ def main(sample_size=100, throttle=0, crawl_only=False):
                         img_url = urljoin(url, img_src)
                         process_image(img_url, img, url, args.domain if args.domain else "unknown", images_data)
             else:
-                print(f"Skipped non-HTML URL: {url}")
+                print(f"⚠️ Skipped non-HTML URL: {url}")
         except Exception as e:
-            print(f"Failed to crawl {url}: {e}")
+            print(f"❌ Failed to crawl {url}: {e}")
 
     # Convert images_data to DataFrame
     filtered_data = {k: v for k, v in images_data.items() if v["count"] > 0}
@@ -635,8 +705,8 @@ def main(sample_size=100, throttle=0, crawl_only=False):
     ])
 
     # Run analysis
-    print(f"Running analysis on {len(images_df)} images...")
-    analyze_alt_text(images_df, input_file)
+    print(f"🔍 Running analysis on {len(images_df)} images...")
+    analyze_alt_text(images_df, input_file, sample_size, scan_type="sitemap")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Scan a website or file for alt text analysis.")
