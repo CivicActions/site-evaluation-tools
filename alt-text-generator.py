@@ -1,70 +1,96 @@
-import os  # Add this import at the top of the script
-
+import os
 # Disable parallelism for Hugging Face tokenizers to avoid fork-related warnings
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-import socket
+import sys
 import argparse
+import logging
+import socket
 import csv
 import json
 import time
-import logging
 import requests
 from PIL import Image
-from transformers import BlipProcessor, BlipForConditionalGeneration
 import re
-# import openai
-from openai import OpenAIError
-# Initialize the OpenAI client
-# from openai import OpenAI
-from openai import AzureOpenAI
 import pytesseract
 from io import BytesIO
 from tqdm import tqdm  # Import tqdm for progress bar
 from datetime import datetime  # Import datetime at the top of the script
-import sys
-import anthropic
 import base64  # Import for Base64 encoding
 from tenacity import retry, stop_after_attempt, wait_fixed
 
+# Disable Hugging Face parallelism warnings & suppress excessive logs
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+import transformers
+transformers.logging.set_verbosity_error()
 
+# ✅ Parse command-line arguments before initializing models
+parser = argparse.ArgumentParser(description="Generate alt text for images based on a CSV file.")
+parser.add_argument("-c", "--csv", help="Path to the input CSV file.")
+parser.add_argument("-m", "--model", default="blip", choices=["blip", "anthropic", "ollama", "azure_openai"],
+                    help="Model to use for text generation.")
+parser.add_argument("-v", "--verbose", action="store_true", help="Enable detailed logging.")
+args = parser.parse_args()
 
-# Add Anthropic and Ollama & Blip API base URLs
-# export ANTHROPIC_API_KEY="your_api_key_here"
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+# ✅ Configure logging based on verbosity
+logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-OLLAMA_API_URL = "http://localhost:11434/api/generate"  # Assuming Ollama runs locally
+# ✅ Show help and exit early if no CSV is provided
+if "-h" in sys.argv or "--help" in sys.argv or not args.csv:
+    parser.print_help()
+    sys.exit(0)
 
+# ✅ Display startup message
+print(f"\n🔵 Running Alt Text Generator\n   - Model: {args.model}\n   - CSV File: {args.csv}\n")
+
+# ✅ Initialize model only when needed
+processor = None
+model = None
 DEFAULT_MODEL = "blip"
-processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
-model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
+client = None
 
-#OpenAI API
-# export AZURE_OPENAI_API_KEY="your_api_key_here"
-AZURE_OPENAI_ENDPOINT = "https://civicactions-openai.openai.azure.com/"
-DEPLOYMENT_NAME = "gpt-4o"
-API_VERSION = "2024-05-01-preview"  # ✅ Define API_VERSION before using it
-subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
+if args.model == "blip":
+    print("🔹 Initializing BLIP model...")
+    logging.info("Initializing the BLIP model...")
+    from transformers import BlipProcessor, BlipForConditionalGeneration
+    processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+    model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
 
-# Debugging: Log API credentials (excluding API key for security)
-# print(f"DEBUG: AZURE_OPENAI_ENDPOINT = {AZURE_OPENAI_ENDPOINT}")
-# print(f"DEBUG: DEPLOYMENT_NAME = {DEPLOYMENT_NAME}")
-# print(f"DEBUG: API_VERSION = {API_VERSION}")
-# print(f"DEBUG: AZURE_OPENAI_API_KEY = {subscription_key[:5]}********")
+elif args.model == "anthropic":
+    print("🔹 Using Anthropic Claude API...")
+    import anthropic
+    # export ANTHROPIC_API_KEY="your_api_key_here"
+    ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
-if not subscription_key:
-    raise ValueError("❌ ERROR: AZURE_OPENAI_API_KEY environment variable is missing.")
+elif args.model == "ollama":
+    print("🔹 Using Ollama model...")
+    OLLAMA_API_URL = "http://localhost:11434/api/generate"  # Assuming Ollama runs locally
 
-try:
-    client = AzureOpenAI(
-        api_key=subscription_key,
-        azure_endpoint=AZURE_OPENAI_ENDPOINT,  # Correct base URL
-        api_version=API_VERSION,
-    )
-    logging.info("✅ Azure OpenAI client initialized successfully.")
-except Exception as e:
-    logging.exception(f"❌ Failed to initialize Azure OpenAI client: {e}")
-    client = None
+elif args.model == "azure_openai":
+    print("🔹 Using Azure OpenAI API...")
+    from openai import AzureOpenAI
+    from openai import OpenAIError
+    # export AZURE_OPENAI_API_KEY="your_api_key_here"
+    AZURE_OPENAI_ENDPOINT = "https://civicactions-openai.openai.azure.com/"
+    DEPLOYMENT_NAME = "gpt-4o"
+    API_VERSION = "2024-05-01-preview"  # ✅ Define API_VERSION before using it
+    subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
+    if not subscription_key:
+        raise ValueError("❌ ERROR: AZURE_OPENAI_API_KEY environment variable is missing.")
+    
+    try:
+        client = AzureOpenAI(
+            api_key=subscription_key,
+            azure_endpoint=AZURE_OPENAI_ENDPOINT,  # Correct base URL
+            api_version=API_VERSION,
+        )
+        logging.info("✅ Azure OpenAI client initialized successfully.")
+    except Exception as e:
+        logging.exception(f"❌ Failed to initialize Azure OpenAI client: {e}")
+        client = None
+
+print("✅ Model initialization complete.\n")
+
 
 def validate_anthropic_key(selected_model):
     """Ensure the Anthropic API key is set only if the 'anthropic' model is selected."""
@@ -456,10 +482,6 @@ def extract_text_with_ocr(image_url):
         logging.error(f"Unexpected error processing image with OCR: {e}")
         return "Unexpected error processing image"
 
-# Initialize the BLIP model and processor
-logging.info("Initializing the BLIP model...")
-processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
-model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
 
 # Define a function to load the CSV file
 def load_csv(file_path):
