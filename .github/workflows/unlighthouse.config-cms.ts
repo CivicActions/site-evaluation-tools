@@ -1,14 +1,17 @@
 module.exports = {
+  site: 'cms.gov',
   puppeteerOptions: {
-        args: ["--no-sandbox", '--disable-dev-shm-usage'],
-        concurrency: 1,
-      },
+    args: ["--no-sandbox", '--disable-dev-shm-usage'],
+  },
+  puppeteerClusterOptions: {
+    concurrency: 1,
+  },
   lighthouseOptions: {
-    onlyCategories: ['best-practices'],
+    onlyCategories: ['performance'],
   },
   server: {
-        open: false,
-  site: 'cms.gov',
+    open: false,
+  },
   scanner: {
     include: [
       "/",
@@ -34,19 +37,18 @@ module.exports = {
       "/status-indicators",
       "/blog"
     ],
-    // run lighthouse for each URL 1 time(s)
-    samples: 3,
-    // use desktop to scan
+    // Run Lighthouse for each URL 3 times
+    samples: 1,
+    // Use desktop to scan
     device: 'desktop',
-    // enable the throttling mode
+    // Enable throttling mode
     throttle: true,
-    // increase the maximum number of routes - https://unlighthouse.dev/api/config#scannermaxroutes
+    // Increase the maximum number of routes
     maxRoutes: 500,
-    // skip the javascript scan
+    // Do not skip the JavaScript scan
     skipJavascript: false,
-    // use sitemaps - arrays are possible for specific sites https://unlighthouse.dev/api/config#scannersitemap
+    // Use sitemaps
     sitemap: true,
-    }
   },
   debug: false,
 };
